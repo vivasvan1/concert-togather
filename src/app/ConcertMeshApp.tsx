@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import {
+  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -16,7 +17,14 @@ import type { FriendStatus } from "../types/domain";
 import { formatTimeLabel, minutesAgo } from "../utils/date";
 import { getFriendLocationSummary } from "../utils/location";
 
-const STATUS_OPTIONS: FriendStatus[] = ["safe", "moving", "at-stage", "at-exit", "at-merch", "need-help"];
+const STATUS_OPTIONS: FriendStatus[] = [
+  "safe",
+  "moving",
+  "at-stage",
+  "at-exit",
+  "at-merch",
+  "need-help",
+];
 
 export function ConcertMeshApp() {
   const {
@@ -43,9 +51,12 @@ export function ConcertMeshApp() {
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.hero}>
           <Text style={styles.kicker}>Concert mesh MVP</Text>
-          <Text style={styles.headline}>Stay connected when the venue network collapses.</Text>
+          <Text style={styles.headline}>
+            Stay connected when the venue network collapses.
+          </Text>
           <Text style={styles.copy}>
-            Create a handle, join the event, and use encrypted relay messaging plus meetup signals to recover your group.
+            Create a handle, join the event, and use encrypted relay messaging plus
+            meetup signals to recover your group.
           </Text>
           <TextInput
             value={handle}
@@ -57,7 +68,10 @@ export function ConcertMeshApp() {
           />
           <Pressable
             onPress={() => bootstrapIdentity(handle || "@crowdlink")}
-            style={({ pressed }) => [styles.primaryButton, pressed && styles.buttonPressed]}
+            style={({ pressed }) => [
+              styles.primaryButton,
+              pressed && styles.buttonPressed,
+            ]}
           >
             <Text style={styles.primaryButtonLabel}>Enter Headliner Night</Text>
           </Pressable>
@@ -73,18 +87,27 @@ export function ConcertMeshApp() {
           <Text style={styles.kicker}>Live event</Text>
           <Text style={styles.headline}>{state.event?.name}</Text>
           <Text style={styles.copy}>
-            {state.event?.venueName} · {state.transportPeers.length} nearby relays · health {state.deliveryHealth}
+            {state.event?.venueName} · {state.transportPeers.length} nearby peers ·
+            health {state.deliveryHealth}
           </Text>
         </View>
 
-        <SectionCard title="Mesh readiness" subtitle="The app shell is transport-aware. Android can carry more background relay load than iOS.">
+        <SectionCard
+          title="Mesh readiness"
+          subtitle="The app shell is transport-aware. Android can carry more background relay load than iOS."
+        >
           {capabilities.map((capability) => (
             <View key={capability.kind} style={styles.row}>
               <View>
                 <Text style={styles.rowTitle}>{capability.label}</Text>
                 <Text style={styles.rowMeta}>{capability.note}</Text>
               </View>
-              <Text style={[styles.badge, capability.available ? styles.goodBadge : styles.mutedBadge]}>
+              <Text
+                style={[
+                  styles.badge,
+                  capability.available ? styles.goodBadge : styles.mutedBadge,
+                ]}
+              >
                 {capability.available ? "ready" : "limited"}
               </Text>
             </View>
@@ -92,10 +115,22 @@ export function ConcertMeshApp() {
         </SectionCard>
 
         <SectionCard
-          title="Live relay test"
-          subtitle="For two real phones today, run the Bun relay on your laptop and point both phones at the same ws:// URL."
+          title="Transport"
+          subtitle="Android APKs can use direct nearby discovery. The relay server remains a fallback for same-Wi-Fi testing."
         >
           <View style={styles.chipWrap}>
+            {Platform.OS === "android" ? (
+              <Pressable
+                onPress={() => setTransportMode("nearby-android")}
+                style={({ pressed }) => [
+                  styles.chip,
+                  state.transportMode === "nearby-android" && styles.chipActive,
+                  pressed && styles.buttonPressed,
+                ]}
+              >
+                <Text style={styles.chipLabel}>Nearby Android</Text>
+              </Pressable>
+            ) : null}
             <Pressable
               onPress={() => setTransportMode("demo")}
               style={({ pressed }) => [
@@ -117,15 +152,6 @@ export function ConcertMeshApp() {
               <Text style={styles.chipLabel}>Relay server</Text>
             </Pressable>
           </View>
-          <TextInput
-            value={relayUrlDraft}
-            onChangeText={setRelayUrlDraft}
-            style={styles.input}
-            placeholder="ws://192.168.x.x:8787"
-            placeholderTextColor="#6F7E90"
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
           <View style={styles.row}>
             <View>
               <Text style={styles.rowTitle}>Connection</Text>
@@ -134,19 +160,45 @@ export function ConcertMeshApp() {
                 {state.transportError ? ` · ${state.transportError}` : ""}
               </Text>
             </View>
-            <Pressable
-              onPress={() => setRelayServerUrl(relayUrlDraft.trim())}
-              style={({ pressed }) => [styles.secondaryButton, pressed && styles.buttonPressed]}
-            >
-              <Text style={styles.secondaryLabel}>Apply URL</Text>
-            </Pressable>
+            {state.transportMode === "relay-server" ? (
+              <Pressable
+                onPress={() => setRelayServerUrl(relayUrlDraft.trim())}
+                style={({ pressed }) => [
+                  styles.secondaryButton,
+                  pressed && styles.buttonPressed,
+                ]}
+              >
+                <Text style={styles.secondaryLabel}>Apply URL</Text>
+              </Pressable>
+            ) : null}
           </View>
+          {state.transportMode === "relay-server" ? (
+            <TextInput
+              value={relayUrlDraft}
+              onChangeText={setRelayUrlDraft}
+              style={styles.input}
+              placeholder="ws://192.168.x.x:8787"
+              placeholderTextColor="#6F7E90"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          ) : null}
           <Text style={styles.rowMeta}>
-            Connected peers: {state.transportPeers.length} · Active mode: {state.transportMode}
+            Connected peers: {state.transportPeers.length} · Active mode:{" "}
+            {state.transportMode}
           </Text>
+          {state.transportMode === "nearby-android" ? (
+            <Text style={styles.rowMeta}>
+              Open the APK on both Android phones, join the same event, grant nearby
+              permissions, and keep both devices in the foreground for the first test.
+            </Text>
+          ) : null}
         </SectionCard>
 
-        <SectionCard title="Find my group" subtitle="Combine meetup zones, last GPS hints, and nearby peer signals.">
+        <SectionCard
+          title="Find my group"
+          subtitle="Combine meetup zones, last GPS hints, and nearby peer signals."
+        >
           <View style={styles.chipWrap}>
             {state.event?.meetupSpots.map((spot) => (
               <Pressable
@@ -167,23 +219,42 @@ export function ConcertMeshApp() {
               <Text style={styles.rowTitle}>Your active rendezvous</Text>
               <Text style={styles.rowMeta}>{state.activeMeetupSpot}</Text>
             </View>
-            <Pressable onPress={refreshGpsHint} style={({ pressed }) => [styles.secondaryButton, pressed && styles.buttonPressed]}>
+            <Pressable
+              onPress={refreshGpsHint}
+              style={({ pressed }) => [
+                styles.secondaryButton,
+                pressed && styles.buttonPressed,
+              ]}
+            >
               <Text style={styles.secondaryLabel}>Refresh GPS</Text>
             </Pressable>
           </View>
         </SectionCard>
 
-        <SectionCard title="Status beacon" subtitle="Short, high-signal updates relay better than long explanations in a crowded mesh.">
+        <SectionCard
+          title="Status beacon"
+          subtitle="Short, high-signal updates relay better than long explanations in a crowded mesh."
+        >
           <View style={styles.chipWrap}>
             {STATUS_OPTIONS.map((status) => (
-              <Pressable key={status} onPress={() => setStatus(status)} style={({ pressed }) => [styles.statusChip, pressed && styles.buttonPressed]}>
+              <Pressable
+                key={status}
+                onPress={() => setStatus(status)}
+                style={({ pressed }) => [
+                  styles.statusChip,
+                  pressed && styles.buttonPressed,
+                ]}
+              >
                 <Text style={styles.chipLabel}>{status}</Text>
               </Pressable>
             ))}
           </View>
         </SectionCard>
 
-        <SectionCard title="Friends" subtitle="Freshness matters more than false precision indoors.">
+        <SectionCard
+          title="Friends"
+          subtitle="Freshness matters more than false precision indoors."
+        >
           {state.friends.map((friend) => {
             const hint = state.locationHints[friend.id];
             return (
@@ -191,7 +262,8 @@ export function ConcertMeshApp() {
                 <View>
                   <Text style={styles.rowTitle}>{friend.displayName}</Text>
                   <Text style={styles.rowMeta}>
-                    {getFriendLocationSummary(hint)} · {minutesAgo(hint?.updatedAt ?? friend.lastSeenAt)}m ago
+                    {getFriendLocationSummary(hint)} ·{" "}
+                    {minutesAgo(hint?.updatedAt ?? friend.lastSeenAt)}m ago
                   </Text>
                 </View>
                 <Text style={styles.badge}>{friend.handle}</Text>
@@ -200,8 +272,24 @@ export function ConcertMeshApp() {
           })}
         </SectionCard>
 
-        <SectionCard title="Encrypted group relay" subtitle="Payloads are encrypted before they enter the relay envelope. The current transport is a simulator until native radio modules are added.">
+        <SectionCard
+          title="Encrypted group relay"
+          subtitle="Payloads are encrypted before they enter the relay envelope. They can now move over direct Android nearby transport or the relay fallback."
+        >
           <View style={styles.composeRow}>
+            <Pressable
+              onPress={async () => {
+                await sendChatMessage(draft);
+                setDraft("");
+              }}
+              style={({ pressed }) => [
+                styles.primaryButton,
+                styles.composeButton,
+                pressed && styles.buttonPressed,
+              ]}
+            >
+              <Text style={styles.primaryButtonLabel}>Send</Text>
+            </Pressable>
             <TextInput
               value={draft}
               onChangeText={setDraft}
@@ -209,25 +297,19 @@ export function ConcertMeshApp() {
               placeholder="Message your crew"
               placeholderTextColor="#6F7E90"
             />
-            <Pressable
-              onPress={async () => {
-                await sendChatMessage(draft);
-                setDraft("");
-              }}
-              style={({ pressed }) => [styles.primaryButton, styles.composeButton, pressed && styles.buttonPressed]}
-            >
-              <Text style={styles.primaryButtonLabel}>Send</Text>
-            </Pressable>
           </View>
           {state.messages.length === 0 ? (
-            <Text style={styles.rowMeta}>No messages yet. Send a meetup instruction or quick check-in.</Text>
+            <Text style={styles.rowMeta}>
+              No messages yet. Send a meetup instruction or quick check-in.
+            </Text>
           ) : (
             state.messages.map((message) => (
               <View key={message.id} style={styles.messageBubble}>
                 <View style={styles.row}>
                   <Text style={styles.rowTitle}>{message.senderLabel}</Text>
                   <Text style={styles.rowMeta}>
-                    {formatTimeLabel(message.createdAt)} · {message.deliveryState} · hops {message.hopCount}
+                    {formatTimeLabel(message.createdAt)} · {message.deliveryState} ·
+                    hops {message.hopCount}
                   </Text>
                 </View>
                 <Text style={styles.messageText}>{message.plaintextPreview}</Text>

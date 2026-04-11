@@ -1,9 +1,23 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Location from "expo-location";
-import React, { createContext, useContext, useEffect, useMemo, useReducer, useRef } from "react";
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+} from "react";
 
 import { createSeedState } from "../data/mockData";
-import { createUserIdentity, decryptPayload, verifyEnvelopeSignature } from "../services/crypto/CryptoService";
+import {
+  AndroidNearbyTransport,
+} from "../services/mesh/AndroidNearbyTransport";
+import {
+  createUserIdentity,
+  decryptPayload,
+  verifyEnvelopeSignature,
+} from "../services/crypto/CryptoService";
 import { DemoCompositeMeshTransport } from "../services/mesh/DemoCompositeMeshTransport";
 import type { MeshTransport } from "../services/mesh/Transport";
 import { createRelayEnvelope } from "../services/mesh/relay";
@@ -34,10 +48,20 @@ type AppAction =
   | { type: "set-peers"; payload: AppState["transportPeers"] }
   | { type: "set-transport-mode"; payload: TransportMode }
   | { type: "set-relay-url"; payload: string }
-  | { type: "set-transport-connection"; payload: { state: TransportConnectionState; error?: string } }
-  | { type: "apply-remote-payload"; payload: { envelope: RelayEnvelope; eventPayload: EventPayload } };
+  | {
+      type: "set-transport-connection";
+      payload: { state: TransportConnectionState; error?: string };
+    }
+  | {
+      type: "apply-remote-payload";
+      payload: { envelope: RelayEnvelope; eventPayload: EventPayload };
+    };
 
-function upsertFriend(friends: FriendProfile[], payload: EventPayload, envelope: RelayEnvelope) {
+function upsertFriend(
+  friends: FriendProfile[],
+  payload: EventPayload,
+  envelope: RelayEnvelope,
+) {
   const existing = friends.find((friend) => friend.id === envelope.senderId);
   const nextFriend: FriendProfile = {
     id: envelope.senderId,
@@ -52,7 +76,9 @@ function upsertFriend(friends: FriendProfile[], payload: EventPayload, envelope:
     return [nextFriend, ...friends];
   }
 
-  return friends.map((friend) => (friend.id === envelope.senderId ? nextFriend : friend));
+  return friends.map((friend) =>
+    friend.id === envelope.senderId ? nextFriend : friend,
+  );
 }
 
 function reducer(state: AppState, action: AppAction): AppState {
@@ -109,7 +135,8 @@ function reducer(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         messages: state.messages.map((message) =>
-          state.queue.find((item) => item.envelope.id === action.payload.envelopeId)?.messageId === message.id
+          state.queue.find((item) => item.envelope.id === action.payload.envelopeId)
+            ?.messageId === message.id
             ? {
                 ...message,
                 deliveryState: "confirmed",
@@ -117,7 +144,9 @@ function reducer(state: AppState, action: AppAction): AppState {
               }
             : message,
         ),
-        queue: state.queue.filter((item) => item.envelope.id !== action.payload.envelopeId),
+        queue: state.queue.filter(
+          (item) => item.envelope.id !== action.payload.envelopeId,
+        ),
       };
     case "set-peers":
       return {
@@ -147,7 +176,11 @@ function reducer(state: AppState, action: AppAction): AppState {
 
       const nextState: AppState = {
         ...state,
-        friends: upsertFriend(state.friends, action.payload.eventPayload, action.payload.envelope),
+        friends: upsertFriend(
+          state.friends,
+          action.payload.eventPayload,
+          action.payload.envelope,
+        ),
         seenEnvelopeIds: [...state.seenEnvelopeIds, action.payload.envelope.id],
       };
 
@@ -168,7 +201,10 @@ function reducer(state: AppState, action: AppAction): AppState {
         ];
       }
 
-      if (action.payload.eventPayload.kind === "meetup" || action.payload.eventPayload.kind === "status") {
+      if (
+        action.payload.eventPayload.kind === "meetup" ||
+        action.payload.eventPayload.kind === "status"
+      ) {
         nextState.locationHints = {
           ...state.locationHints,
           [action.payload.envelope.senderId]: {
@@ -202,6 +238,10 @@ interface AppContextValue {
 const AppContext = createContext<AppContextValue | undefined>(undefined);
 
 function createTransport(mode: TransportMode): MeshTransport {
+  if (mode === "nearby-android") {
+    return new AndroidNearbyTransport();
+  }
+
   if (mode === "relay-server") {
     return new WebSocketRelayTransport();
   }
@@ -305,7 +345,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
 
       try {
-        const plaintext = decryptPayload(envelope.ciphertext, envelope.nonce, currentState.event.sharedKey);
+        const plaintext = decryptPayload(
+          envelope.ciphertext,
+          envelope.nonce,
+          currentState.event.sharedKey,
+        );
         const eventPayload = JSON.parse(plaintext) as EventPayload;
 
         dispatch({
@@ -320,7 +364,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           type: "set-transport-connection",
           payload: {
             state: "error",
-            error: "Received an envelope that could not be decrypted with the event key.",
+            error:
+              "Received an envelope that could not be decrypted with the event key.",
           },
         });
       }
@@ -334,15 +379,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       });
     });
 
-    const unsubscribeConnection = transport.onConnectionStateChanged((connectionState, error) => {
-      dispatch({
-        type: "set-transport-connection",
-        payload: {
-          state: connectionState,
-          error,
-        },
-      });
-    });
+    const unsubscribeConnection = transport.onConnectionStateChanged(
+      (connectionState, error) => {
+        dispatch({
+          type: "set-transport-connection",
+          payload: {
+            state: connectionState,
+            error,
+          },
+        });
+      },
+    );
 
     transport
       .start({
@@ -383,7 +430,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
 
         const payload = buildPayload(state, state.user, "chat", text.trim());
-        const envelope = createRelayEnvelope(JSON.stringify(payload), state.user, state.event);
+        const envelope = createRelayEnvelope(
+          JSON.stringify(payload),
+          state.user,
+          state.event,
+        );
 
         dispatch({
           type: "queue-envelope",
@@ -431,7 +482,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           "meetup",
           spot,
         );
-        const envelope = createRelayEnvelope(JSON.stringify(payload), state.user, state.event);
+        const envelope = createRelayEnvelope(
+          JSON.stringify(payload),
+          state.user,
+          state.event,
+        );
 
         dispatch({
           type: "queue-envelope",
@@ -508,7 +563,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           "status",
           status,
         );
-        const envelope = createRelayEnvelope(JSON.stringify(payload), state.user, state.event);
+        const envelope = createRelayEnvelope(
+          JSON.stringify(payload),
+          state.user,
+          state.event,
+        );
 
         dispatch({
           type: "queue-envelope",

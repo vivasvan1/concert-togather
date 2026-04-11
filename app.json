@@ -26,6 +26,7 @@
         "ACCESS_FINE_LOCATION",
         "BLUETOOTH",
         "BLUETOOTH_ADMIN",
+        "BLUETOOTH_ADVERTISE",
         "BLUETOOTH_CONNECT",
         "BLUETOOTH_SCAN",
         "ACCESS_WIFI_STATE",

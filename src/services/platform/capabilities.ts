@@ -1,11 +1,21 @@
 import { Platform } from "react-native";
 
 import type { MeshCapability } from "../../types/domain";
+import { isConcertNearbyMeshAvailable } from "../mesh/ConcertNearbyMeshModule";
 
 export function getPlatformCapabilities(): MeshCapability[] {
   const isAndroid = Platform.OS === "android";
 
   return [
+    {
+      kind: "nearby",
+      label: "Direct nearby mesh",
+      available: isAndroid && isConcertNearbyMeshAvailable(),
+      canRelayInBackground: false,
+      note: isAndroid
+        ? "Android APK/dev build only. Uses native nearby discovery without a relay server."
+        : "Unavailable on iOS in the current implementation.",
+    },
     {
       kind: "bluetooth",
       label: "Bluetooth relay",

@@ -1,6 +1,10 @@
-export type TransportKind = "bluetooth" | "wifi-direct" | "internet-fallback";
+export type TransportKind =
+  | "bluetooth"
+  | "wifi-direct"
+  | "internet-fallback"
+  | "nearby";
 
-export type TransportMode = "demo" | "relay-server";
+export type TransportMode = "demo" | "relay-server" | "nearby-android";
 
 export type TransportConnectionState = "disconnected" | "connecting" | "connected" | "error";
 

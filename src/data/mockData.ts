@@ -56,9 +56,9 @@ export function createSeedState(): AppState {
     queue: [],
     deliveryHealth: "degraded",
     activeMeetupSpot: "Sound Booth",
-    transportMode: "demo",
+    transportMode: "nearby-android",
     relayServerUrl: "ws://192.168.1.10:8787",
-    transportConnectionState: "connected",
+    transportConnectionState: "disconnected",
     seenEnvelopeIds: [],
   };
 }

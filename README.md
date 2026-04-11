@@ -9,7 +9,7 @@ Concert Togather is a React Native MVP for helping friends reconnect at large co
 
 ## Current State
 
-This repo implements the application shell, domain model, local persistence, message encryption, relay envelope flow, a demo transport simulator, and a local WebSocket relay server for two-phone testing on the same Wi‑Fi network. It does **not** yet include the native Bluetooth/Wi-Fi mesh modules required for true offline device-to-device relay.
+This repo implements the application shell, domain model, local persistence, message encryption, relay envelope flow, a demo transport simulator, a local WebSocket relay server fallback, and an Android native nearby transport built as a local Expo module.
 
 ## Setup
 
@@ -27,9 +27,10 @@ The APK is suitable for:
 - onboarding and handle creation
 - meetup/status flows
 - GPS permission flow
-- encrypted messaging between two phones through the laptop relay server
+- encrypted messaging between two Android phones through direct nearby discovery
+- fallback same-Wi-Fi messaging through the laptop relay server
 
-It is not yet suitable for true offline Bluetooth or Wi-Fi Direct mesh testing.
+The current native implementation is Android-only and optimized for the first direct two-phone milestone, not full crowd-tested multi-hop mesh yet.
 
 ### One-time prerequisites
 
@@ -50,8 +51,20 @@ When the build finishes, download the generated `.apk` and install it on both An
 ### Test with 2 phones
 
 1. Install the APK on both devices.
-2. Put both phones and your laptop on the same Wi-Fi network.
-3. Start the relay server on your laptop:
+2. Open the APK on both Android phones.
+3. In the app on both phones:
+   - create different handles
+   - keep transport mode on `Nearby Android`
+   - grant nearby/Bluetooth/location permissions when prompted
+   - join the same event
+4. Keep both devices in the foreground and send messages between them.
+
+### Fallback relay test
+
+If direct nearby transport is flaky on your devices, you can still use the relay fallback:
+
+1. Put both phones and your laptop on the same Wi-Fi network.
+2. Start the relay server on your laptop:
 
 ```bash
 bun run relay
@@ -63,7 +76,7 @@ If `8787` is already in use:
 PORT=19091 bun run relay
 ```
 
-4. Find your laptop IP:
+3. Find your laptop IP:
 
 ```bash
 ipconfig getifaddr en0
@@ -75,12 +88,12 @@ or, if needed:
 ipconfig getifaddr en1
 ```
 
-5. In the app on both phones:
+4. In the app on both phones:
    - create different handles
    - switch transport mode to `Relay server`
    - enter `ws://YOUR_LAN_IP:PORT`
    - tap `Apply URL`
-6. Send messages and meetup updates between the two phones.
+5. Send messages and meetup updates between the two phones.
 
 ## Two-Phone Test
 
@@ -105,21 +118,22 @@ PORT=19091 bun run relay
    - tap `Apply URL`
 5. Send messages between the phones. Meetup/status updates should also propagate.
 
-This path is for real cross-device testing over Wi‑Fi with encrypted envelopes relayed by your laptop. It is not yet Bluetooth mesh.
+This fallback path is for real cross-device testing over Wi‑Fi with encrypted envelopes relayed by your laptop.
 
 ## Architecture
 
 - `src/app`: app shell and top-level screen composition
 - `src/state`: app reducer, persistence, and mesh coordinator
 - `src/services/crypto`: end-to-end payload encryption and signed relay envelopes
-- `src/services/mesh`: transport interfaces, demo transport, and WebSocket relay transport
+- `src/services/mesh`: transport interfaces, demo transport, WebSocket relay transport, and Android nearby transport
+- `modules/concert-nearby-mesh`: local Expo Android module backed by Google Nearby Connections
 - `scripts/relay-server.ts`: local Bun relay server for two-phone testing
 - `src/services/platform`: platform capability matrix for Android/iOS
 - `src/types`: shared domain types for users, events, messages, and location hints
 
 ## Native Next Steps
 
-1. Replace the relay-test transport path with platform-native peer adapters.
-2. Implement Android Bluetooth LE + Wi-Fi Direct discovery and data channels.
+1. Harden the Android nearby transport for reconnects, duplicate suppression, and background lifecycle.
+2. Expand from direct nearby messaging to tested multi-hop forwarding.
 3. Implement an iOS-capable nearby transport with explicit foreground/limited-background constraints.
 4. Add a minimal coordination backend for accounts, event join, key bundles, and online bootstrap.
