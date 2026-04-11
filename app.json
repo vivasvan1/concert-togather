@@ -1,0 +1,36 @@
+{
+  "expo": {
+    "name": "Concert Togather",
+    "slug": "concert-togather",
+    "scheme": "concerttogather",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Concert Togather uses your location to help friends find your meetup spot when service is weak."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#10141A"
+      },
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "BLUETOOTH",
+        "BLUETOOTH_ADMIN",
+        "BLUETOOTH_CONNECT",
+        "BLUETOOTH_SCAN",
+        "ACCESS_WIFI_STATE",
+        "CHANGE_WIFI_STATE",
+        "NEARBY_WIFI_DEVICES"
+      ]
+    }
+  }
+}
+
