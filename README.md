@@ -19,6 +19,69 @@ bun run typecheck
 bun run start
 ```
 
+## Build Android APK
+
+This project can already be packaged as an Android APK and installed on two phones.
+The APK is suitable for:
+
+- onboarding and handle creation
+- meetup/status flows
+- GPS permission flow
+- encrypted messaging between two phones through the laptop relay server
+
+It is not yet suitable for true offline Bluetooth or Wi-Fi Direct mesh testing.
+
+### One-time prerequisites
+
+```bash
+npm install -g eas-cli
+eas login
+```
+
+### Build the APK
+
+```bash
+cd /Users/vivasvan.patel/Work/concert-togather
+eas build -p android --profile preview
+```
+
+When the build finishes, download the generated `.apk` and install it on both Android phones.
+
+### Test with 2 phones
+
+1. Install the APK on both devices.
+2. Put both phones and your laptop on the same Wi-Fi network.
+3. Start the relay server on your laptop:
+
+```bash
+bun run relay
+```
+
+If `8787` is already in use:
+
+```bash
+PORT=19091 bun run relay
+```
+
+4. Find your laptop IP:
+
+```bash
+ipconfig getifaddr en0
+```
+
+or, if needed:
+
+```bash
+ipconfig getifaddr en1
+```
+
+5. In the app on both phones:
+   - create different handles
+   - switch transport mode to `Relay server`
+   - enter `ws://YOUR_LAN_IP:PORT`
+   - tap `Apply URL`
+6. Send messages and meetup updates between the two phones.
+
 ## Two-Phone Test
 
 1. Start the local relay server on your laptop:
