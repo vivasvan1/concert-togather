@@ -1,5 +1,9 @@
 export type TransportKind = "bluetooth" | "wifi-direct" | "internet-fallback";
 
+export type TransportMode = "demo" | "relay-server";
+
+export type TransportConnectionState = "disconnected" | "connecting" | "connected" | "error";
+
 export type DeliveryState = "local" | "relayed" | "confirmed" | "stale";
 
 export type AvailabilityState = "online" | "degraded" | "offline";
@@ -63,6 +67,7 @@ export interface RelayEnvelope {
   id: string;
   eventId: string;
   senderId: string;
+  senderPublicKey: string;
   recipientScope: "event-group";
   ciphertext: string;
   signature: string;
@@ -104,5 +109,21 @@ export interface AppState {
   queue: OutboundQueueItem[];
   deliveryHealth: AvailabilityState;
   activeMeetupSpot: string;
+  transportMode: TransportMode;
+  relayServerUrl: string;
+  transportConnectionState: TransportConnectionState;
+  transportError?: string;
+  seenEnvelopeIds: string[];
 }
 
+export interface EventPayload {
+  kind: "chat" | "meetup" | "status";
+  body: string;
+  senderHandle: string;
+  senderLabel: string;
+  sentAt: string;
+  meetupSpot?: string;
+  status?: FriendStatus;
+  gps?: PeerLocationHint["gps"];
+  proximity?: PeerLocationHint["proximity"];
+}

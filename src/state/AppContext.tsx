@@ -1,12 +1,25 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Location from "expo-location";
-import React, { createContext, useContext, useEffect, useMemo, useReducer } from "react";
+import React, { createContext, useContext, useEffect, useMemo, useReducer, useRef } from "react";
 
 import { createSeedState } from "../data/mockData";
-import { createUserIdentity, verifyEnvelopeSignature } from "../services/crypto/CryptoService";
+import { createUserIdentity, decryptPayload, verifyEnvelopeSignature } from "../services/crypto/CryptoService";
 import { DemoCompositeMeshTransport } from "../services/mesh/DemoCompositeMeshTransport";
+import type { MeshTransport } from "../services/mesh/Transport";
 import { createRelayEnvelope } from "../services/mesh/relay";
-import type { AppState, ChatMessage, FriendStatus, PeerLocationHint, RelayEnvelope, UserIdentity } from "../types/domain";
+import { WebSocketRelayTransport } from "../services/mesh/WebSocketRelayTransport";
+import type {
+  AppState,
+  ChatMessage,
+  EventPayload,
+  FriendProfile,
+  FriendStatus,
+  PeerLocationHint,
+  RelayEnvelope,
+  TransportConnectionState,
+  TransportMode,
+  UserIdentity,
+} from "../types/domain";
 import { createId } from "../utils/ids";
 
 const STORAGE_KEY = "concert-togather/app-state";
@@ -18,7 +31,29 @@ type AppAction =
   | { type: "set-location"; payload: PeerLocationHint }
   | { type: "queue-envelope"; payload: { envelope: RelayEnvelope; preview: string } }
   | { type: "confirm-envelope"; payload: { envelopeId: string } }
-  | { type: "set-peers"; payload: AppState["transportPeers"] };
+  | { type: "set-peers"; payload: AppState["transportPeers"] }
+  | { type: "set-transport-mode"; payload: TransportMode }
+  | { type: "set-relay-url"; payload: string }
+  | { type: "set-transport-connection"; payload: { state: TransportConnectionState; error?: string } }
+  | { type: "apply-remote-payload"; payload: { envelope: RelayEnvelope; eventPayload: EventPayload } };
+
+function upsertFriend(friends: FriendProfile[], payload: EventPayload, envelope: RelayEnvelope) {
+  const existing = friends.find((friend) => friend.id === envelope.senderId);
+  const nextFriend: FriendProfile = {
+    id: envelope.senderId,
+    handle: payload.senderHandle,
+    displayName: payload.senderLabel,
+    publicKey: envelope.senderPublicKey,
+    status: payload.status ?? existing?.status ?? "moving",
+    lastSeenAt: payload.sentAt,
+  };
+
+  if (!existing) {
+    return [nextFriend, ...friends];
+  }
+
+  return friends.map((friend) => (friend.id === envelope.senderId ? nextFriend : friend));
+}
 
 function reducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
@@ -66,6 +101,7 @@ function reducer(state: AppState, action: AppAction): AppState {
           },
           ...state.queue,
         ],
+        seenEnvelopeIds: [...state.seenEnvelopeIds, action.payload.envelope.id],
         deliveryHealth: "online",
       };
     }
@@ -88,6 +124,65 @@ function reducer(state: AppState, action: AppAction): AppState {
         ...state,
         transportPeers: action.payload,
       };
+    case "set-transport-mode":
+      return {
+        ...state,
+        transportMode: action.payload,
+      };
+    case "set-relay-url":
+      return {
+        ...state,
+        relayServerUrl: action.payload,
+      };
+    case "set-transport-connection":
+      return {
+        ...state,
+        transportConnectionState: action.payload.state,
+        transportError: action.payload.error,
+      };
+    case "apply-remote-payload": {
+      if (state.seenEnvelopeIds.includes(action.payload.envelope.id)) {
+        return state;
+      }
+
+      const nextState: AppState = {
+        ...state,
+        friends: upsertFriend(state.friends, action.payload.eventPayload, action.payload.envelope),
+        seenEnvelopeIds: [...state.seenEnvelopeIds, action.payload.envelope.id],
+      };
+
+      if (action.payload.eventPayload.kind === "chat") {
+        nextState.messages = [
+          {
+            id: createId("msg"),
+            senderId: action.payload.envelope.senderId,
+            senderLabel: action.payload.eventPayload.senderLabel,
+            eventId: action.payload.envelope.eventId,
+            ciphertext: action.payload.envelope.ciphertext,
+            plaintextPreview: action.payload.eventPayload.body,
+            createdAt: action.payload.eventPayload.sentAt,
+            deliveryState: "relayed",
+            hopCount: action.payload.envelope.hopCount,
+          },
+          ...state.messages,
+        ];
+      }
+
+      if (action.payload.eventPayload.kind === "meetup" || action.payload.eventPayload.kind === "status") {
+        nextState.locationHints = {
+          ...state.locationHints,
+          [action.payload.envelope.senderId]: {
+            friendId: action.payload.envelope.senderId,
+            updatedAt: action.payload.eventPayload.sentAt,
+            meetupSpot: action.payload.eventPayload.meetupSpot,
+            gps: action.payload.eventPayload.gps,
+            proximity: action.payload.eventPayload.proximity,
+          },
+        };
+      }
+
+      return nextState;
+    }
     default:
       return state;
   }
@@ -100,22 +195,69 @@ interface AppContextValue {
   shareMeetupSpot: (spot: string) => Promise<void>;
   refreshGpsHint: () => Promise<void>;
   setStatus: (status: FriendStatus) => Promise<void>;
+  setTransportMode: (mode: TransportMode) => void;
+  setRelayServerUrl: (url: string) => void;
 }
 
 const AppContext = createContext<AppContextValue | undefined>(undefined);
 
-const transport = new DemoCompositeMeshTransport();
+function createTransport(mode: TransportMode): MeshTransport {
+  if (mode === "relay-server") {
+    return new WebSocketRelayTransport();
+  }
+
+  return new DemoCompositeMeshTransport();
+}
+
+function mergeHydratedState(base: AppState, persisted: AppState): AppState {
+  return {
+    ...base,
+    ...persisted,
+    event: persisted.event ?? base.event,
+    friends: persisted.friends ?? base.friends,
+    messages: persisted.messages ?? base.messages,
+    locationHints: {
+      ...base.locationHints,
+      ...persisted.locationHints,
+    },
+    transportPeers: persisted.transportPeers ?? [],
+    queue: persisted.queue ?? [],
+    seenEnvelopeIds: persisted.seenEnvelopeIds ?? [],
+  };
+}
+
+function buildPayload(
+  state: AppState,
+  user: UserIdentity,
+  kind: EventPayload["kind"],
+  body: string,
+): EventPayload {
+  return {
+    kind,
+    body,
+    senderHandle: user.handle,
+    senderLabel: user.displayName,
+    sentAt: new Date().toISOString(),
+    meetupSpot: state.activeMeetupSpot,
+    gps: state.locationHints[user.id]?.gps,
+    proximity: state.locationHints[user.id]?.proximity,
+    status: kind === "status" ? (body as FriendStatus) : undefined,
+  };
+}
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(reducer, undefined, createSeedState);
+  const transportRef = useRef<MeshTransport>(createTransport("demo"));
+  const stateRef = useRef(state);
 
   useEffect(() => {
     AsyncStorage.getItem(STORAGE_KEY)
       .then((value) => {
         if (value) {
+          const persisted = JSON.parse(value) as AppState;
           dispatch({
             type: "hydrated",
-            payload: JSON.parse(value) as AppState,
+            payload: mergeHydratedState(createSeedState(), persisted),
           });
         }
       })
@@ -127,38 +269,104 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [state]);
 
   useEffect(() => {
-    transport.start().catch(() => undefined);
-    dispatch({
-      type: "set-peers",
-      payload: transport.getPeers(),
+    stateRef.current = state;
+  }, [state]);
+
+  useEffect(() => {
+    if (!state.user || !state.event) {
+      return;
+    }
+
+    const transport = createTransport(state.transportMode);
+    transportRef.current = transport;
+
+    const unsubscribeEnvelope = transport.onEnvelope((envelope) => {
+      const currentState = stateRef.current;
+      if (!currentState.event) {
+        return;
+      }
+
+      if (!verifyEnvelopeSignature(envelope, envelope.senderPublicKey)) {
+        return;
+      }
+
+      if (envelope.senderId === currentState.user?.id) {
+        dispatch({
+          type: "confirm-envelope",
+          payload: {
+            envelopeId: envelope.id,
+          },
+        });
+        return;
+      }
+
+      if (currentState.seenEnvelopeIds.includes(envelope.id)) {
+        return;
+      }
+
+      try {
+        const plaintext = decryptPayload(envelope.ciphertext, envelope.nonce, currentState.event.sharedKey);
+        const eventPayload = JSON.parse(plaintext) as EventPayload;
+
+        dispatch({
+          type: "apply-remote-payload",
+          payload: {
+            envelope,
+            eventPayload,
+          },
+        });
+      } catch {
+        dispatch({
+          type: "set-transport-connection",
+          payload: {
+            state: "error",
+            error: "Received an envelope that could not be decrypted with the event key.",
+          },
+        });
+      }
     });
 
-    const unsubscribe = transport.onEnvelope((envelope) => {
-      if (!state.event || !state.user) {
-        return;
-      }
-
-      if (envelope.senderId !== state.user.id) {
-        return;
-      }
-
-      if (!verifyEnvelopeSignature(envelope, state.user.publicKey)) {
-        return;
-      }
-
+    const unsubscribePeers = transport.onPeersChanged((peers) => {
+      const currentState = stateRef.current;
       dispatch({
-        type: "confirm-envelope",
+        type: "set-peers",
+        payload: peers.filter((peer) => peer.id !== currentState.user?.id),
+      });
+    });
+
+    const unsubscribeConnection = transport.onConnectionStateChanged((connectionState, error) => {
+      dispatch({
+        type: "set-transport-connection",
         payload: {
-          envelopeId: envelope.id,
+          state: connectionState,
+          error,
         },
       });
     });
 
+    transport
+      .start({
+        event: state.event,
+        user: state.user,
+        relayServerUrl: state.relayServerUrl,
+      })
+      .catch((error: Error) => {
+        dispatch({
+          type: "set-transport-connection",
+          payload: {
+            state: "error",
+            error: error.message,
+          },
+        });
+      });
+
     return () => {
-      unsubscribe();
+      unsubscribeEnvelope();
+      unsubscribePeers();
+      unsubscribeConnection();
       transport.stop().catch(() => undefined);
     };
-  }, [state.event, state.user]);
+  }, [state.event, state.relayServerUrl, state.transportMode, state.user]);
 
   const value = useMemo<AppContextValue>(
     () => ({
@@ -174,14 +382,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
-        const envelope = createRelayEnvelope(
-          JSON.stringify({
-            kind: "chat",
-            body: text.trim(),
-          }),
-          state.user,
-          state.event,
-        );
+        const payload = buildPayload(state, state.user, "chat", text.trim());
+        const envelope = createRelayEnvelope(JSON.stringify(payload), state.user, state.event);
 
         dispatch({
           type: "queue-envelope",
@@ -191,7 +393,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           },
         });
 
-        await transport.send(envelope);
+        await transportRef.current.send(envelope);
       },
       async shareMeetupSpot(spot) {
         if (!state.user || !state.event) {
@@ -203,23 +405,33 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           payload: spot,
         });
 
+        const locationHint: PeerLocationHint = {
+          friendId: state.user.id,
+          meetupSpot: spot,
+          updatedAt: new Date().toISOString(),
+          gps: state.locationHints[state.user.id]?.gps,
+          proximity: state.locationHints[state.user.id]?.proximity,
+        };
+
         dispatch({
           type: "set-location",
-          payload: {
-            friendId: state.user.id,
-            meetupSpot: spot,
-            updatedAt: new Date().toISOString(),
-          },
+          payload: locationHint,
         });
 
-        const envelope = createRelayEnvelope(
-          JSON.stringify({
-            kind: "meetup",
-            body: spot,
-          }),
+        const payload = buildPayload(
+          {
+            ...state,
+            activeMeetupSpot: spot,
+            locationHints: {
+              ...state.locationHints,
+              [state.user.id]: locationHint,
+            },
+          },
           state.user,
-          state.event,
+          "meetup",
+          spot,
         );
+        const envelope = createRelayEnvelope(JSON.stringify(payload), state.user, state.event);
 
         dispatch({
           type: "queue-envelope",
@@ -229,7 +441,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           },
         });
 
-        await transport.send(envelope);
+        await transportRef.current.send(envelope);
       },
       async refreshGpsHint() {
         if (!state.user) {
@@ -268,27 +480,35 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
+        const locationHint: PeerLocationHint = {
+          friendId: state.user.id,
+          updatedAt: new Date().toISOString(),
+          meetupSpot: state.activeMeetupSpot,
+          gps: state.locationHints[state.user.id]?.gps,
+          proximity: {
+            estimate: "same-zone",
+            confidence: 0.58,
+          },
+        };
+
         dispatch({
           type: "set-location",
-          payload: {
-            friendId: state.user.id,
-            updatedAt: new Date().toISOString(),
-            meetupSpot: state.activeMeetupSpot,
-            proximity: {
-              estimate: "same-zone",
-              confidence: 0.58,
-            },
-          },
+          payload: locationHint,
         });
 
-        const envelope = createRelayEnvelope(
-          JSON.stringify({
-            kind: "status",
-            body: status,
-          }),
+        const payload = buildPayload(
+          {
+            ...state,
+            locationHints: {
+              ...state.locationHints,
+              [state.user.id]: locationHint,
+            },
+          },
           state.user,
-          state.event,
+          "status",
+          status,
         );
+        const envelope = createRelayEnvelope(JSON.stringify(payload), state.user, state.event);
 
         dispatch({
           type: "queue-envelope",
@@ -298,7 +518,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           },
         });
 
-        await transport.send(envelope);
+        await transportRef.current.send(envelope);
+      },
+      setTransportMode(mode) {
+        dispatch({
+          type: "set-transport-mode",
+          payload: mode,
+        });
+      },
+      setRelayServerUrl(url) {
+        dispatch({
+          type: "set-relay-url",
+          payload: url,
+        });
       },
     }),
     [state],

@@ -46,18 +46,21 @@ export function decryptPayload(ciphertext: string, nonce: string, sharedKey: str
   return encodeUTF8(opened);
 }
 
-export function signEnvelopePayload(envelope: Pick<RelayEnvelope, "ciphertext" | "nonce" | "dedupeKey" | "eventId" | "createdAt">, secretKey: string) {
-  const payload = `${envelope.eventId}:${envelope.dedupeKey}:${envelope.nonce}:${envelope.ciphertext}:${envelope.createdAt}`;
+export function signEnvelopePayload(
+  envelope: Pick<RelayEnvelope, "ciphertext" | "nonce" | "dedupeKey" | "eventId" | "createdAt" | "senderId" | "senderPublicKey">,
+  secretKey: string,
+) {
+  const payload = `${envelope.eventId}:${envelope.senderId}:${envelope.senderPublicKey}:${envelope.dedupeKey}:${envelope.nonce}:${envelope.ciphertext}:${envelope.createdAt}`;
   const signature = nacl.sign.detached(decodeUTF8(payload), decodeBase64(secretKey));
 
   return encodeBase64(signature);
 }
 
 export function verifyEnvelopeSignature(
-  envelope: Pick<RelayEnvelope, "ciphertext" | "nonce" | "dedupeKey" | "eventId" | "createdAt" | "signature">,
+  envelope: Pick<RelayEnvelope, "ciphertext" | "nonce" | "dedupeKey" | "eventId" | "createdAt" | "signature" | "senderId" | "senderPublicKey">,
   publicKey: string,
 ) {
-  const payload = `${envelope.eventId}:${envelope.dedupeKey}:${envelope.nonce}:${envelope.ciphertext}:${envelope.createdAt}`;
+  const payload = `${envelope.eventId}:${envelope.senderId}:${envelope.senderPublicKey}:${envelope.dedupeKey}:${envelope.nonce}:${envelope.ciphertext}:${envelope.createdAt}`;
   return nacl.sign.detached.verify(
     decodeUTF8(payload),
     decodeBase64(envelope.signature),

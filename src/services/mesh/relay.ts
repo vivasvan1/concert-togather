@@ -12,6 +12,7 @@ export function createRelayEnvelope(payload: string, user: UserIdentity, event: 
     id: createId("env"),
     eventId: event.id,
     senderId: user.id,
+    senderPublicKey: user.publicKey,
     recipientScope: "event-group" as const,
     ciphertext,
     nonce,

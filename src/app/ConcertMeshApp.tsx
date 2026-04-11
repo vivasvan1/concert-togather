@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Pressable,
   SafeAreaView,
@@ -19,10 +19,24 @@ import { getFriendLocationSummary } from "../utils/location";
 const STATUS_OPTIONS: FriendStatus[] = ["safe", "moving", "at-stage", "at-exit", "at-merch", "need-help"];
 
 export function ConcertMeshApp() {
-  const { state, bootstrapIdentity, sendChatMessage, shareMeetupSpot, refreshGpsHint, setStatus } = useAppState();
+  const {
+    state,
+    bootstrapIdentity,
+    sendChatMessage,
+    shareMeetupSpot,
+    refreshGpsHint,
+    setStatus,
+    setTransportMode,
+    setRelayServerUrl,
+  } = useAppState();
   const [handle, setHandle] = useState("");
   const [draft, setDraft] = useState("");
+  const [relayUrlDraft, setRelayUrlDraft] = useState(state.relayServerUrl);
   const capabilities = getPlatformCapabilities();
+
+  useEffect(() => {
+    setRelayUrlDraft(state.relayServerUrl);
+  }, [state.relayServerUrl]);
 
   if (!state.user) {
     return (
@@ -75,6 +89,61 @@ export function ConcertMeshApp() {
               </Text>
             </View>
           ))}
+        </SectionCard>
+
+        <SectionCard
+          title="Live relay test"
+          subtitle="For two real phones today, run the Bun relay on your laptop and point both phones at the same ws:// URL."
+        >
+          <View style={styles.chipWrap}>
+            <Pressable
+              onPress={() => setTransportMode("demo")}
+              style={({ pressed }) => [
+                styles.chip,
+                state.transportMode === "demo" && styles.chipActive,
+                pressed && styles.buttonPressed,
+              ]}
+            >
+              <Text style={styles.chipLabel}>Demo transport</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setTransportMode("relay-server")}
+              style={({ pressed }) => [
+                styles.chip,
+                state.transportMode === "relay-server" && styles.chipActive,
+                pressed && styles.buttonPressed,
+              ]}
+            >
+              <Text style={styles.chipLabel}>Relay server</Text>
+            </Pressable>
+          </View>
+          <TextInput
+            value={relayUrlDraft}
+            onChangeText={setRelayUrlDraft}
+            style={styles.input}
+            placeholder="ws://192.168.x.x:8787"
+            placeholderTextColor="#6F7E90"
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <View style={styles.row}>
+            <View>
+              <Text style={styles.rowTitle}>Connection</Text>
+              <Text style={styles.rowMeta}>
+                {state.transportConnectionState}
+                {state.transportError ? ` · ${state.transportError}` : ""}
+              </Text>
+            </View>
+            <Pressable
+              onPress={() => setRelayServerUrl(relayUrlDraft.trim())}
+              style={({ pressed }) => [styles.secondaryButton, pressed && styles.buttonPressed]}
+            >
+              <Text style={styles.secondaryLabel}>Apply URL</Text>
+            </Pressable>
+          </View>
+          <Text style={styles.rowMeta}>
+            Connected peers: {state.transportPeers.length} · Active mode: {state.transportMode}
+          </Text>
         </SectionCard>
 
         <SectionCard title="Find my group" subtitle="Combine meetup zones, last GPS hints, and nearby peer signals.">
@@ -158,7 +227,7 @@ export function ConcertMeshApp() {
                 <View style={styles.row}>
                   <Text style={styles.rowTitle}>{message.senderLabel}</Text>
                   <Text style={styles.rowMeta}>
-                    {formatTimeLabel(message.createdAt)} · {message.deliveryState}
+                    {formatTimeLabel(message.createdAt)} · {message.deliveryState} · hops {message.hopCount}
                   </Text>
                 </View>
                 <Text style={styles.messageText}>{message.plaintextPreview}</Text>

@@ -1,5 +1,6 @@
-import { createEventSharedKey } from "../services/crypto/CryptoService";
 import type { AppState, FriendProfile } from "../types/domain";
+
+const DEV_EVENT_SHARED_KEY = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=";
 
 function createFriend(id: string, handle: string, displayName: string): FriendProfile {
   return {
@@ -23,7 +24,7 @@ export function createSeedState(): AppState {
       venueName: "Apollo Grounds",
       startedAt: now,
       meetupSpots: ["North Gate", "Sound Booth", "Merch Bar", "Food Court", "Exit C"],
-      sharedKey: createEventSharedKey(),
+      sharedKey: DEV_EVENT_SHARED_KEY,
     },
     friends: [
       createFriend("friend-mira", "@mira", "Mira"),
@@ -55,5 +56,9 @@ export function createSeedState(): AppState {
     queue: [],
     deliveryHealth: "degraded",
     activeMeetupSpot: "Sound Booth",
+    transportMode: "demo",
+    relayServerUrl: "ws://192.168.1.10:8787",
+    transportConnectionState: "connected",
+    seenEnvelopeIds: [],
   };
 }

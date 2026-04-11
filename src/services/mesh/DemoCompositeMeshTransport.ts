@@ -1,8 +1,10 @@
-import type { MeshTransport } from "./Transport";
-import type { RelayEnvelope, TransportPeer } from "../../types/domain";
+import type { MeshTransport, TransportRuntimeContext } from "./Transport";
+import type { RelayEnvelope, TransportConnectionState, TransportPeer } from "../../types/domain";
 
 export class DemoCompositeMeshTransport implements MeshTransport {
   private listeners = new Set<(envelope: RelayEnvelope) => void>();
+  private peerListeners = new Set<(peers: TransportPeer[]) => void>();
+  private connectionListeners = new Set<(state: TransportConnectionState, error?: string) => void>();
 
   private peers: TransportPeer[] = [
     {
@@ -19,11 +21,14 @@ export class DemoCompositeMeshTransport implements MeshTransport {
     },
   ];
 
-  async start() {
+  async start(_context: TransportRuntimeContext) {
+    this.emitConnection("connected");
+    this.emitPeers();
     return;
   }
 
   async stop() {
+    this.emitConnection("disconnected");
     return;
   }
 
@@ -48,5 +53,33 @@ export class DemoCompositeMeshTransport implements MeshTransport {
     return () => {
       this.listeners.delete(listener);
     };
+  }
+
+  onPeersChanged(listener: (peers: TransportPeer[]) => void) {
+    this.peerListeners.add(listener);
+    listener(this.peers);
+    return () => {
+      this.peerListeners.delete(listener);
+    };
+  }
+
+  onConnectionStateChanged(listener: (state: TransportConnectionState, error?: string) => void) {
+    this.connectionListeners.add(listener);
+    listener("connected");
+    return () => {
+      this.connectionListeners.delete(listener);
+    };
+  }
+
+  private emitPeers() {
+    for (const listener of this.peerListeners) {
+      listener(this.peers);
+    }
+  }
+
+  private emitConnection(state: TransportConnectionState, error?: string) {
+    for (const listener of this.connectionListeners) {
+      listener(state, error);
+    }
   }
 }

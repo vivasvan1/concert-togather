@@ -8,6 +8,7 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
+    "relay": "bun run scripts/relay-server.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -26,4 +27,3 @@
     "typescript": "~5.8.3"
   }
 }
-
