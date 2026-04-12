@@ -1,7 +1,8 @@
 package expo.modules.concertnearbymesh
 
 import android.util.Log
-import com.google.android.gms.common.ConnectionResult
+import com.google.android.gms.common.api.ApiException
+import com.google.android.gms.tasks.Task
 import com.google.android.gms.nearby.Nearby
 import com.google.android.gms.nearby.connection.AdvertisingOptions
 import com.google.android.gms.nearby.connection.ConnectionInfo
@@ -60,6 +61,7 @@ class ConcertNearbyMeshModule : Module() {
     }
 
     AsyncFunction("startSession") { eventId: String, userId: String, alias: String ->
+      Log.i(MODULE_NAME, "startSession eventId=$eventId userId=$userId alias=$alias")
       stopActiveSession()
 
       activeEventId = eventId
@@ -76,27 +78,46 @@ class ConcertNearbyMeshModule : Module() {
         .setStrategy(STRATEGY)
         .build()
 
-      connectionsClient.startAdvertising(
+      val advertisingTask: Task<Void> = connectionsClient.startAdvertising(
         buildEndpointName(eventId, userId, alias),
         SERVICE_ID,
         connectionLifecycleCallback,
         advertisingOptions
-      ).addOnFailureListener { error ->
+      )
+      advertisingTask.addOnFailureListener { error ->
         Log.e(MODULE_NAME, "Failed to start advertising", error)
-        emitConnectionState("error", "Failed to start Android nearby advertising.")
+        emitConnectionState(
+          "error",
+          describeError("Failed to start Android nearby advertising", error),
+          getStatusCode(error)
+        )
+      }
+      advertisingTask.addOnSuccessListener {
+        Log.i(MODULE_NAME, "Advertising started for serviceId=$SERVICE_ID")
       }
 
-      connectionsClient.startDiscovery(
+      val discoveryTask: Task<Void> = connectionsClient.startDiscovery(
         SERVICE_ID,
         endpointDiscoveryCallback,
         discoveryOptions
-      ).addOnFailureListener { error ->
+      )
+      discoveryTask.addOnFailureListener { error ->
         Log.e(MODULE_NAME, "Failed to start discovery", error)
-        emitConnectionState("error", "Failed to start Android nearby discovery.")
+        emitConnectionState(
+          "error",
+          describeError("Failed to start Android nearby discovery", error),
+          getStatusCode(error)
+        )
       }
+      discoveryTask.addOnSuccessListener {
+        Log.i(MODULE_NAME, "Discovery started for serviceId=$SERVICE_ID")
+      }
+
+      return@AsyncFunction Unit
     }
 
     AsyncFunction("stopSession") {
+      Log.i(MODULE_NAME, "stopSession")
       stopActiveSession()
       emitConnectionState("disconnected", null)
     }
@@ -106,13 +127,23 @@ class ConcertNearbyMeshModule : Module() {
         throw IllegalStateException("No nearby peers are connected.")
       }
 
+      Log.i(MODULE_NAME, "sendEnvelope peers=${connectedPeers.size} bytes=${envelopeJson.length}")
       val payload = Payload.fromBytes(envelopeJson.toByteArray(StandardCharsets.UTF_8))
       val endpointIds = connectedPeers.keys.toList()
-      connectionsClient.sendPayload(endpointIds, payload)
-        .addOnFailureListener { error ->
-          Log.e(MODULE_NAME, "Failed to send nearby payload", error)
-          emitConnectionState("error", "Failed to send to nearby peers.")
-        }
+      val sendTask: Task<Void> = connectionsClient.sendPayload(endpointIds, payload)
+      sendTask.addOnFailureListener { error ->
+        Log.e(MODULE_NAME, "Failed to send nearby payload", error)
+        emitConnectionState(
+          "error",
+          describeError("Failed to send to nearby peers", error),
+          getStatusCode(error)
+        )
+      }
+      sendTask.addOnSuccessListener {
+        Log.i(MODULE_NAME, "sendEnvelope success endpoints=${endpointIds.joinToString(",")}")
+      }
+
+      return@AsyncFunction Unit
     }
 
     OnDestroy {
@@ -122,8 +153,10 @@ class ConcertNearbyMeshModule : Module() {
 
   private val endpointDiscoveryCallback = object : EndpointDiscoveryCallback() {
     override fun onEndpointFound(endpointId: String, info: DiscoveredEndpointInfo) {
+      Log.i(MODULE_NAME, "onEndpointFound endpointId=$endpointId name=${info.endpointName}")
       val endpoint = parseEndpointName(info.endpointName) ?: return
       if (endpoint.eventId != activeEventId || endpoint.userId == activeUserId) {
+        Log.i(MODULE_NAME, "Ignoring endpointId=$endpointId eventId=${endpoint.eventId} userId=${endpoint.userId}")
         return
       }
 
@@ -140,10 +173,17 @@ class ConcertNearbyMeshModule : Module() {
         connectionLifecycleCallback
       ).addOnFailureListener { error ->
         Log.w(MODULE_NAME, "Request connection failed for $endpointId", error)
+        emitConnectionState(
+          "error",
+          describeError("Nearby request connection failed", error),
+          getStatusCode(error)
+        )
       }
+      Log.i(MODULE_NAME, "requestConnection started endpointId=$endpointId alias=${endpoint.alias}")
     }
 
     override fun onEndpointLost(endpointId: String) {
+      Log.i(MODULE_NAME, "onEndpointLost endpointId=$endpointId")
       discoveredPeers.remove(endpointId)
       connectedPeers.remove(endpointId)
       emitPeersChanged()
@@ -152,23 +192,47 @@ class ConcertNearbyMeshModule : Module() {
 
   private val connectionLifecycleCallback = object : ConnectionLifecycleCallback() {
     override fun onConnectionInitiated(endpointId: String, connectionInfo: ConnectionInfo) {
-      val endpoint = parseEndpointName(connectionInfo.endpointName)
-      if (endpoint == null || endpoint.eventId != activeEventId || endpoint.userId == activeUserId) {
+      Log.i(MODULE_NAME, "onConnectionInitiated endpointId=$endpointId name=${connectionInfo.endpointName}")
+      val discoveredPeer = discoveredPeers[endpointId]
+      val parsedEndpoint = parseEndpointName(connectionInfo.endpointName)
+
+      // Nearby may surface only the remote alias here, not the full endpoint name
+      // we advertised/discovered earlier. Prefer the cached discovered peer when present.
+      if (discoveredPeer == null && (parsedEndpoint == null || parsedEndpoint.userId == activeUserId)) {
+        Log.i(MODULE_NAME, "Rejecting unknown connection endpointId=$endpointId")
         connectionsClient.rejectConnection(endpointId)
         return
       }
 
-      discoveredPeers[endpointId] = NearbyPeer(
-        endpointId = endpointId,
-        userId = endpoint.userId,
-        alias = endpoint.alias,
-        lastSeenAt = nowIso()
-      )
+      if (discoveredPeer == null && parsedEndpoint != null) {
+        if (parsedEndpoint.eventId != activeEventId || parsedEndpoint.userId == activeUserId) {
+          Log.i(MODULE_NAME, "Rejecting parsed connection endpointId=$endpointId")
+          connectionsClient.rejectConnection(endpointId)
+          return
+        }
+
+        discoveredPeers[endpointId] = NearbyPeer(
+          endpointId = endpointId,
+          userId = parsedEndpoint.userId,
+          alias = parsedEndpoint.alias,
+          lastSeenAt = nowIso()
+        )
+      } else if (discoveredPeer != null) {
+        discoveredPeer.lastSeenAt = nowIso()
+      }
 
       connectionsClient.acceptConnection(endpointId, payloadCallback)
+      Log.i(
+        MODULE_NAME,
+        "acceptConnection endpointId=$endpointId alias=${discoveredPeers[endpointId]?.alias ?: connectionInfo.endpointName}"
+      )
     }
 
     override fun onConnectionResult(endpointId: String, result: ConnectionResolution) {
+      Log.i(
+        MODULE_NAME,
+        "onConnectionResult endpointId=$endpointId status=${result.status.statusCode} message=${result.status.statusMessage}"
+      )
       if (result.status.statusCode == ConnectionsStatusCodes.STATUS_OK) {
         val peer = discoveredPeers[endpointId]
         if (peer != null) {
@@ -178,13 +242,22 @@ class ConcertNearbyMeshModule : Module() {
         emitPeersChanged()
         emitConnectionState("connected", null)
       } else {
+        Log.w(
+          MODULE_NAME,
+          "Nearby connection failed with status ${result.status.statusCode}: ${result.status.statusMessage}"
+        )
         connectedPeers.remove(endpointId)
         emitPeersChanged()
-        emitConnectionState("error", "Nearby connection failed.")
+        emitConnectionState(
+          "error",
+          "Nearby connection failed: ${result.status.statusMessage ?: "unknown"}",
+          result.status.statusCode
+        )
       }
     }
 
     override fun onDisconnected(endpointId: String) {
+      Log.i(MODULE_NAME, "onDisconnected endpointId=$endpointId")
       connectedPeers.remove(endpointId)
       emitPeersChanged()
       if (connectedPeers.isEmpty()) {
@@ -195,6 +268,7 @@ class ConcertNearbyMeshModule : Module() {
 
   private val payloadCallback = object : PayloadCallback() {
     override fun onPayloadReceived(endpointId: String, payload: Payload) {
+      Log.i(MODULE_NAME, "onPayloadReceived endpointId=$endpointId type=${payload.type}")
       val peer = connectedPeers[endpointId]
       if (peer != null) {
         peer.lastSeenAt = nowIso()
@@ -207,6 +281,7 @@ class ConcertNearbyMeshModule : Module() {
 
       val bytes = payload.asBytes() ?: return
       val envelopeJson = String(bytes, StandardCharsets.UTF_8)
+      Log.i(MODULE_NAME, "onPayloadReceived bytes=${bytes.size}")
       sendEvent(
         "onEnvelope",
         mapOf("envelopeJson" to envelopeJson)
@@ -219,6 +294,7 @@ class ConcertNearbyMeshModule : Module() {
   }
 
   private fun stopActiveSession() {
+    Log.i(MODULE_NAME, "stopActiveSession")
     discoveredPeers.clear()
     connectedPeers.clear()
 
@@ -245,20 +321,32 @@ class ConcertNearbyMeshModule : Module() {
         )
       }
 
+    Log.i(MODULE_NAME, "emitPeersChanged peers=${peers.size}")
     sendEvent(
       "onPeersChanged",
       mapOf("peers" to peers)
     )
   }
 
-  private fun emitConnectionState(state: String, error: String?) {
+  private fun emitConnectionState(state: String, error: String?, statusCode: Int? = null) {
+    Log.i(MODULE_NAME, "emitConnectionState state=$state statusCode=$statusCode error=$error")
     sendEvent(
       "onConnectionStateChanged",
       mapOf(
         "state" to state,
-        "error" to error
+        "error" to error,
+        "statusCode" to statusCode
       )
     )
+  }
+
+  private fun getStatusCode(error: Throwable): Int? {
+    return (error as? ApiException)?.statusCode
+  }
+
+  private fun describeError(prefix: String, error: Throwable): String {
+    val suffix = error.message?.takeIf { it.isNotBlank() } ?: error.javaClass.simpleName
+    return "$prefix: $suffix"
   }
 
   private fun buildEndpointName(eventId: String, userId: String, alias: String): String {

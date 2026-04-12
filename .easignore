@@ -1,0 +1,13 @@
+.git
+.gitignore
+node_modules
+android
+ios
+*.apk
+*.aab
+dist
+build
+.expo
+.idea
+.vscode
+*.log

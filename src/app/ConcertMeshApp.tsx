@@ -13,29 +13,18 @@ import {
 import { SectionCard } from "../components/SectionCard";
 import { getPlatformCapabilities } from "../services/platform/capabilities";
 import { useAppState } from "../state/AppContext";
-import type { FriendStatus } from "../types/domain";
 import { formatTimeLabel, minutesAgo } from "../utils/date";
-import { getFriendLocationSummary } from "../utils/location";
-
-const STATUS_OPTIONS: FriendStatus[] = [
-  "safe",
-  "moving",
-  "at-stage",
-  "at-exit",
-  "at-merch",
-  "need-help",
-];
 
 export function ConcertMeshApp() {
   const {
     state,
     bootstrapIdentity,
+    addNearbyPeerAsFriend,
     sendChatMessage,
-    shareMeetupSpot,
-    refreshGpsHint,
-    setStatus,
     setTransportMode,
     setRelayServerUrl,
+    startNearbyTransport,
+    stopNearbyTransport,
   } = useAppState();
   const [handle, setHandle] = useState("");
   const [draft, setDraft] = useState("");
@@ -50,13 +39,13 @@ export function ConcertMeshApp() {
     return (
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.hero}>
-          <Text style={styles.kicker}>Concert mesh MVP</Text>
+          <Text style={styles.kicker}>Nearby friend finder</Text>
           <Text style={styles.headline}>
-            Stay connected when the venue network collapses.
+            Find nearby people and message them directly.
           </Text>
           <Text style={styles.copy}>
-            Create a handle, join the event, and use encrypted relay messaging plus
-            meetup signals to recover your group.
+            Create a handle, start nearby discovery, add friends from the live peer
+            list, and send messages once they are in range.
           </Text>
           <TextInput
             value={handle}
@@ -87,8 +76,8 @@ export function ConcertMeshApp() {
           <Text style={styles.kicker}>Live event</Text>
           <Text style={styles.headline}>{state.event?.name}</Text>
           <Text style={styles.copy}>
-            {state.event?.venueName} · {state.transportPeers.length} nearby peers ·
-            health {state.deliveryHealth}
+            {state.event?.venueName} · {state.transportPeers.length} nearby peers
+            found
           </Text>
         </View>
 
@@ -188,93 +177,110 @@ export function ConcertMeshApp() {
             {state.transportMode}
           </Text>
           {state.transportMode === "nearby-android" ? (
+            <View style={styles.row}>
+              <View>
+                <Text style={styles.rowTitle}>Nearby permission</Text>
+                <Text style={styles.rowMeta}>{state.nearbyPermissionState}</Text>
+              </View>
+              <Pressable
+                onPress={
+                  state.nearbyEnabled ? stopNearbyTransport : startNearbyTransport
+                }
+                style={({ pressed }) => [
+                  styles.secondaryButton,
+                  pressed && styles.buttonPressed,
+                ]}
+              >
+                <Text style={styles.secondaryLabel}>
+                  {state.nearbyEnabled ? "Stop Nearby" : "Start Nearby"}
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
+          {state.transportMode === "nearby-android" ? (
             <Text style={styles.rowMeta}>
-              Open the APK on both Android phones, join the same event, grant nearby
-              permissions, and keep both devices in the foreground for the first test.
+              Open the APK on both Android phones, join the same event, tap Start
+              Nearby, grant the permission prompts, and keep both devices in the
+              foreground for the first test.
             </Text>
           ) : null}
         </SectionCard>
 
         <SectionCard
-          title="Find my group"
-          subtitle="Combine meetup zones, last GPS hints, and nearby peer signals."
+          title="Find Nearby"
+          subtitle="Discover nearby phones, then explicitly add the ones you want to keep as friends."
         >
-          <View style={styles.chipWrap}>
-            {state.event?.meetupSpots.map((spot) => (
-              <Pressable
-                key={spot}
-                onPress={() => shareMeetupSpot(spot)}
-                style={({ pressed }) => [
-                  styles.chip,
-                  state.activeMeetupSpot === spot && styles.chipActive,
-                  pressed && styles.buttonPressed,
-                ]}
-              >
-                <Text style={styles.chipLabel}>{spot}</Text>
-              </Pressable>
-            ))}
-          </View>
-          <View style={styles.row}>
-            <View>
-              <Text style={styles.rowTitle}>Your active rendezvous</Text>
-              <Text style={styles.rowMeta}>{state.activeMeetupSpot}</Text>
-            </View>
-            <Pressable
-              onPress={refreshGpsHint}
-              style={({ pressed }) => [
-                styles.secondaryButton,
-                pressed && styles.buttonPressed,
-              ]}
-            >
-              <Text style={styles.secondaryLabel}>Refresh GPS</Text>
-            </Pressable>
-          </View>
-        </SectionCard>
-
-        <SectionCard
-          title="Status beacon"
-          subtitle="Short, high-signal updates relay better than long explanations in a crowded mesh."
-        >
-          <View style={styles.chipWrap}>
-            {STATUS_OPTIONS.map((status) => (
-              <Pressable
-                key={status}
-                onPress={() => setStatus(status)}
-                style={({ pressed }) => [
-                  styles.statusChip,
-                  pressed && styles.buttonPressed,
-                ]}
-              >
-                <Text style={styles.chipLabel}>{status}</Text>
-              </Pressable>
-            ))}
-          </View>
+          {state.transportPeers.length === 0 ? (
+            <Text style={styles.rowMeta}>
+              No nearby peers yet. Start nearby on both devices and keep the apps in
+              the foreground.
+            </Text>
+          ) : (
+            state.transportPeers.map((peer) => {
+              const alreadyAdded = state.friends.some((friend) => friend.id === peer.id);
+              return (
+                <View key={peer.id} style={styles.friendCard}>
+                  <View>
+                    <Text style={styles.rowTitle}>{peer.alias}</Text>
+                    <Text style={styles.rowMeta}>
+                      Nearby over {peer.via} · seen {minutesAgo(peer.lastSeenAt)}m ago
+                    </Text>
+                  </View>
+                  {alreadyAdded ? (
+                    <Text style={[styles.badge, styles.goodBadge]}>Added</Text>
+                  ) : (
+                    <Pressable
+                      onPress={() => addNearbyPeerAsFriend(peer.id)}
+                      style={({ pressed }) => [
+                        styles.secondaryButton,
+                        pressed && styles.buttonPressed,
+                      ]}
+                    >
+                      <Text style={styles.secondaryLabel}>Add Friend</Text>
+                    </Pressable>
+                  )}
+                </View>
+              );
+            })
+          )}
         </SectionCard>
 
         <SectionCard
           title="Friends"
-          subtitle="Freshness matters more than false precision indoors."
+          subtitle="Only manually added nearby peers appear here."
         >
-          {state.friends.map((friend) => {
-            const hint = state.locationHints[friend.id];
-            return (
-              <View key={friend.id} style={styles.friendCard}>
-                <View>
-                  <Text style={styles.rowTitle}>{friend.displayName}</Text>
-                  <Text style={styles.rowMeta}>
-                    {getFriendLocationSummary(hint)} ·{" "}
-                    {minutesAgo(hint?.updatedAt ?? friend.lastSeenAt)}m ago
-                  </Text>
+          {state.friends.length === 0 ? (
+            <Text style={styles.rowMeta}>
+              No friends added yet. Use Find Nearby to add one from a discovered
+              device.
+            </Text>
+          ) : (
+            state.friends.map((friend) => {
+              const hint = state.locationHints[friend.id];
+              const peer = state.transportPeers.find((item) => item.id === friend.id);
+              const routeStatus = peer
+                ? `Nearby and connected via ${peer.via}`
+                : hint?.proximity
+                  ? `Route status: ${hint.proximity.estimate.replace("-", " ")}`
+                  : `Last seen ${minutesAgo(friend.lastSeenAt)}m ago`;
+              return (
+                <View key={friend.id} style={styles.friendCard}>
+                  <View>
+                    <Text style={styles.rowTitle}>{friend.displayName}</Text>
+                    <Text style={styles.rowMeta}>
+                      {routeStatus}
+                    </Text>
+                  </View>
+                  <Text style={styles.badge}>{friend.handle}</Text>
                 </View>
-                <Text style={styles.badge}>{friend.handle}</Text>
-              </View>
-            );
-          })}
+              );
+            })
+          )}
         </SectionCard>
 
         <SectionCard
-          title="Encrypted group relay"
-          subtitle="Payloads are encrypted before they enter the relay envelope. They can now move over direct Android nearby transport or the relay fallback."
+          title="Send Message"
+          subtitle="Messages are encrypted before they go over nearby transport."
         >
           <View style={styles.composeRow}>
             <Pressable
@@ -300,7 +306,7 @@ export function ConcertMeshApp() {
           </View>
           {state.messages.length === 0 ? (
             <Text style={styles.rowMeta}>
-              No messages yet. Send a meetup instruction or quick check-in.
+              No messages yet. Add a nearby friend and send a test message.
             </Text>
           ) : (
             state.messages.map((message) => (

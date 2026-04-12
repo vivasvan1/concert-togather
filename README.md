@@ -48,6 +48,23 @@ eas build -p android --profile preview
 
 When the build finishes, download the generated `.apk` and install it on both Android phones.
 
+### Faster local rebuilds
+
+For repeated device testing on the same machine, skip the full EAS local flow and reuse a generated native Android project:
+
+```bash
+cd /Users/vivasvan.patel/Work/concert-togather
+bun run android:fast-build
+```
+
+This does:
+
+- `expo prebuild --platform android` once, if `android/` does not exist yet
+- `./gradlew assembleRelease` for subsequent APK rebuilds
+- copies the final APK to `./concert-togather-release.apk`
+
+This is usually much faster than rerunning `eas build --local` every time.
+
 ### Test with 2 phones
 
 1. Install the APK on both devices.
@@ -55,9 +72,27 @@ When the build finishes, download the generated `.apk` and install it on both An
 3. In the app on both phones:
    - create different handles
    - keep transport mode on `Nearby Android`
+   - tap `Start Nearby`
    - grant nearby/Bluetooth/location permissions when prompted
    - join the same event
 4. Keep both devices in the foreground and send messages between them.
+
+### Focused adb logs
+
+Use these commands to keep logs readable while testing nearby transport:
+
+```bash
+adb logcat -c
+adb shell am force-stop com.vivasvan.concerttogather
+adb shell am start -n com.vivasvan.concerttogather/.MainActivity
+adb logcat -v time AndroidRuntime:E ReactNativeJS:I ConcertNearbyMesh:V *:S
+```
+
+If you are targeting a specific device:
+
+```bash
+adb -s DEVICE_ID logcat -v time AndroidRuntime:E ReactNativeJS:I ConcertNearbyMesh:V *:S
+```
 
 ### Fallback relay test
 

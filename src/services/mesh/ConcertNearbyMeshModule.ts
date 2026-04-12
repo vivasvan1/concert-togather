@@ -2,8 +2,14 @@ import { requireOptionalNativeModule } from "expo-modules-core";
 import { Platform } from "react-native";
 
 type ConnectionEvent = {
-  state: "disconnected" | "connecting" | "connected" | "error";
+  state:
+    | "disconnected"
+    | "permission-required"
+    | "connecting"
+    | "connected"
+    | "error";
   error?: string;
+  statusCode?: number;
 };
 
 type PeersEvent = {
@@ -50,4 +56,3 @@ export function getConcertNearbyMeshModule() {
 export function isConcertNearbyMeshAvailable() {
   return Boolean(nativeModule?.isAvailable());
 }
-

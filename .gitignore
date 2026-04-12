@@ -4,4 +4,6 @@ node_modules
 dist
 web-build
 *.log
-
+android/app/build
+modules/concert-nearby-mesh/android/build
+*.apk

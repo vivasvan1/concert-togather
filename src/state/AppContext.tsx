@@ -8,6 +8,7 @@ import React, {
   useReducer,
   useRef,
 } from "react";
+import { PermissionsAndroid, Platform } from "react-native";
 
 import { createSeedState } from "../data/mockData";
 import {
@@ -28,6 +29,7 @@ import type {
   EventPayload,
   FriendProfile,
   FriendStatus,
+  NearbyPermissionState,
   PeerLocationHint,
   RelayEnvelope,
   TransportConnectionState,
@@ -36,11 +38,14 @@ import type {
 } from "../types/domain";
 import { createId } from "../utils/ids";
 
-const STORAGE_KEY = "concert-togather/app-state";
+const STORAGE_KEY = "concert-togather/app-state-v2";
+type AndroidPermissionValue =
+  (typeof PermissionsAndroid.PERMISSIONS)[keyof typeof PermissionsAndroid.PERMISSIONS];
 
 type AppAction =
   | { type: "hydrated"; payload: AppState }
   | { type: "set-user"; payload: UserIdentity }
+  | { type: "add-friend-from-peer"; payload: AppState["transportPeers"][number] }
   | { type: "set-meetup"; payload: string }
   | { type: "set-location"; payload: PeerLocationHint }
   | { type: "queue-envelope"; payload: { envelope: RelayEnvelope; preview: string } }
@@ -48,6 +53,8 @@ type AppAction =
   | { type: "set-peers"; payload: AppState["transportPeers"] }
   | { type: "set-transport-mode"; payload: TransportMode }
   | { type: "set-relay-url"; payload: string }
+  | { type: "set-nearby-enabled"; payload: boolean }
+  | { type: "set-nearby-permission-state"; payload: NearbyPermissionState }
   | {
       type: "set-transport-connection";
       payload: { state: TransportConnectionState; error?: string };
@@ -73,7 +80,7 @@ function upsertFriend(
   };
 
   if (!existing) {
-    return [nextFriend, ...friends];
+    return friends;
   }
 
   return friends.map((friend) =>
@@ -89,6 +96,27 @@ function reducer(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         user: action.payload,
+      };
+    case "add-friend-from-peer":
+      if (state.friends.some((friend) => friend.id === action.payload.id)) {
+        return state;
+      }
+
+      return {
+        ...state,
+        friends: [
+          {
+            id: action.payload.id,
+            handle: action.payload.alias.startsWith("@")
+              ? action.payload.alias
+              : `@${action.payload.alias}`,
+            displayName: action.payload.alias.replace(/^@/, ""),
+            publicKey: "",
+            status: "moving",
+            lastSeenAt: action.payload.lastSeenAt,
+          },
+          ...state.friends,
+        ],
       };
     case "set-meetup":
       return {
@@ -157,11 +185,32 @@ function reducer(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         transportMode: action.payload,
+        nearbyEnabled:
+          action.payload === "nearby-android" ? state.nearbyEnabled : false,
+        transportPeers: [],
+        transportConnectionState:
+          action.payload === "nearby-android"
+            ? "permission-required"
+            : "disconnected",
+        transportError:
+          action.payload === "nearby-android"
+            ? "Grant nearby permissions and tap Start Nearby."
+            : undefined,
       };
     case "set-relay-url":
       return {
         ...state,
         relayServerUrl: action.payload,
+      };
+    case "set-nearby-enabled":
+      return {
+        ...state,
+        nearbyEnabled: action.payload,
+      };
+    case "set-nearby-permission-state":
+      return {
+        ...state,
+        nearbyPermissionState: action.payload,
       };
     case "set-transport-connection":
       return {
@@ -227,12 +276,12 @@ function reducer(state: AppState, action: AppAction): AppState {
 interface AppContextValue {
   state: AppState;
   bootstrapIdentity: (handle: string) => void;
+  addNearbyPeerAsFriend: (peerId: string) => void;
   sendChatMessage: (text: string) => Promise<void>;
-  shareMeetupSpot: (spot: string) => Promise<void>;
-  refreshGpsHint: () => Promise<void>;
-  setStatus: (status: FriendStatus) => Promise<void>;
   setTransportMode: (mode: TransportMode) => void;
   setRelayServerUrl: (url: string) => void;
+  startNearbyTransport: () => Promise<void>;
+  stopNearbyTransport: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextValue | undefined>(undefined);
@@ -262,7 +311,53 @@ function mergeHydratedState(base: AppState, persisted: AppState): AppState {
     },
     transportPeers: persisted.transportPeers ?? [],
     queue: persisted.queue ?? [],
+    nearbyPermissionState: persisted.nearbyPermissionState ?? base.nearbyPermissionState,
+    nearbyEnabled: persisted.nearbyEnabled ?? base.nearbyEnabled,
     seenEnvelopeIds: persisted.seenEnvelopeIds ?? [],
+  };
+}
+
+async function requestNearbyPermissions() {
+  if (Platform.OS !== "android") {
+    return {
+      granted: false,
+      state: "denied" as NearbyPermissionState,
+      missing: ["android-only"],
+    };
+  }
+
+  const apiLevel =
+    typeof Platform.Version === "number"
+      ? Platform.Version
+      : Number.parseInt(String(Platform.Version), 10);
+
+  const permissions: AndroidPermissionValue[] = [
+    PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+  ];
+
+  if (apiLevel >= 31) {
+    permissions.push(
+      PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
+      PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+      PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADVERTISE,
+    );
+  }
+
+  if (apiLevel >= 33) {
+    permissions.push(PermissionsAndroid.PERMISSIONS.NEARBY_WIFI_DEVICES);
+  }
+
+  const results = (await PermissionsAndroid.requestMultiple(
+    permissions,
+  )) as Record<AndroidPermissionValue, string>;
+  const missing = permissions.filter(
+    (permission) => results[permission] !== PermissionsAndroid.RESULTS.GRANTED,
+  );
+
+  return {
+    granted: missing.length === 0,
+    state: missing.length === 0 ? ("granted" as NearbyPermissionState) : ("denied" as NearbyPermissionState),
+    missing,
   };
 }
 
@@ -317,16 +412,29 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    if (state.transportMode === "nearby-android" && !state.nearbyEnabled) {
+      dispatch({
+        type: "set-transport-connection",
+        payload: {
+          state: "permission-required",
+          error: "Grant nearby permissions and tap Start Nearby.",
+        },
+      });
+      return;
+    }
+
     const transport = createTransport(state.transportMode);
     transportRef.current = transport;
 
     const unsubscribeEnvelope = transport.onEnvelope((envelope) => {
+      console.info("[ConcertMesh] envelope received", envelope.id, envelope.senderId);
       const currentState = stateRef.current;
       if (!currentState.event) {
         return;
       }
 
       if (!verifyEnvelopeSignature(envelope, envelope.senderPublicKey)) {
+        console.warn("[ConcertMesh] invalid envelope signature", envelope.id);
         return;
       }
 
@@ -341,6 +449,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (currentState.seenEnvelopeIds.includes(envelope.id)) {
+        console.info("[ConcertMesh] duplicate envelope ignored", envelope.id);
         return;
       }
 
@@ -360,6 +469,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           },
         });
       } catch {
+        console.warn("[ConcertMesh] envelope decrypt failed", envelope.id);
         dispatch({
           type: "set-transport-connection",
           payload: {
@@ -373,6 +483,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     const unsubscribePeers = transport.onPeersChanged((peers) => {
       const currentState = stateRef.current;
+      console.info("[ConcertMesh] peers changed", peers.length);
       dispatch({
         type: "set-peers",
         payload: peers.filter((peer) => peer.id !== currentState.user?.id),
@@ -381,6 +492,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     const unsubscribeConnection = transport.onConnectionStateChanged(
       (connectionState, error) => {
+        console.info("[ConcertMesh] connection state", connectionState, error ?? "");
         dispatch({
           type: "set-transport-connection",
           payload: {
@@ -398,6 +510,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         relayServerUrl: state.relayServerUrl,
       })
       .catch((error: Error) => {
+        console.warn("[ConcertMesh] transport start failed", error.message);
         dispatch({
           type: "set-transport-connection",
           payload: {
@@ -413,7 +526,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       unsubscribeConnection();
       transport.stop().catch(() => undefined);
     };
-  }, [state.event, state.relayServerUrl, state.transportMode, state.user]);
+  }, [state.event, state.nearbyEnabled, state.relayServerUrl, state.transportMode, state.user]);
 
   const value = useMemo<AppContextValue>(
     () => ({
@@ -422,6 +535,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         dispatch({
           type: "set-user",
           payload: createUserIdentity(handle.startsWith("@") ? handle : `@${handle}`),
+        });
+      },
+      addNearbyPeerAsFriend(peerId) {
+        const peer = state.transportPeers.find((item) => item.id === peerId);
+        if (!peer) {
+          return;
+        }
+
+        dispatch({
+          type: "add-friend-from-peer",
+          payload: peer,
         });
       },
       async sendChatMessage(text) {
@@ -446,7 +570,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
         await transportRef.current.send(envelope);
       },
-      async shareMeetupSpot(spot) {
+      async shareMeetupSpot(spot: string) {
         if (!state.user || !state.event) {
           return;
         }
@@ -530,7 +654,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           },
         });
       },
-      async setStatus(status) {
+      async setStatus(status: FriendStatus) {
         if (!state.user || !state.event) {
           return;
         }
@@ -590,6 +714,65 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           type: "set-relay-url",
           payload: url,
         });
+      },
+      async startNearbyTransport() {
+        console.info("[ConcertMesh] request nearby permissions");
+        const result = await requestNearbyPermissions();
+        console.info(
+          "[ConcertMesh] nearby permission result",
+          result.state,
+          result.missing.join(",") || "none",
+        );
+
+        dispatch({
+          type: "set-nearby-permission-state",
+          payload: result.state,
+        });
+
+        if (!result.granted) {
+          const error = `Missing permissions: ${result.missing.join(", ")}`;
+          console.warn("[ConcertMesh] nearby permission denied", error);
+          dispatch({
+            type: "set-nearby-enabled",
+            payload: false,
+          });
+          dispatch({
+            type: "set-transport-connection",
+            payload: {
+              state: "permission-required",
+              error,
+            },
+          });
+          return;
+        }
+
+        dispatch({
+          type: "set-nearby-enabled",
+          payload: true,
+        });
+        console.info("[ConcertMesh] nearby transport enabled");
+        dispatch({
+          type: "set-transport-connection",
+          payload: {
+            state: "connecting",
+            error: undefined,
+          },
+        });
+      },
+      async stopNearbyTransport() {
+        console.info("[ConcertMesh] stop nearby transport");
+        dispatch({
+          type: "set-nearby-enabled",
+          payload: false,
+        });
+        dispatch({
+          type: "set-transport-connection",
+          payload: {
+            state: "disconnected",
+            error: undefined,
+          },
+        });
+        await transportRef.current.stop();
       },
     }),
     [state],

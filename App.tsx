@@ -1,3 +1,5 @@
+import "react-native-get-random-values";
+
 import { StatusBar } from "expo-status-bar";
 import React from "react";
 
@@ -12,4 +14,3 @@ export default function App() {
     </AppProvider>
   );
 }
-

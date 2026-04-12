@@ -6,7 +6,14 @@ export type TransportKind =
 
 export type TransportMode = "demo" | "relay-server" | "nearby-android";
 
-export type TransportConnectionState = "disconnected" | "connecting" | "connected" | "error";
+export type TransportConnectionState =
+  | "disconnected"
+  | "permission-required"
+  | "connecting"
+  | "connected"
+  | "error";
+
+export type NearbyPermissionState = "unknown" | "granted" | "denied";
 
 export type DeliveryState = "local" | "relayed" | "confirmed" | "stale";
 
@@ -117,6 +124,8 @@ export interface AppState {
   relayServerUrl: string;
   transportConnectionState: TransportConnectionState;
   transportError?: string;
+  nearbyPermissionState: NearbyPermissionState;
+  nearbyEnabled: boolean;
   seenEnvelopeIds: string[];
 }
 

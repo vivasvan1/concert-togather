@@ -37,7 +37,11 @@ export class AndroidNearbyTransport implements MeshTransport {
 
     this.subscriptions = [
       module.addListener("onConnectionStateChanged", (event) => {
-        this.emitConnection(event.state, event.error);
+        const errorMessage =
+          typeof event.statusCode === "number" && event.error
+            ? `${event.error} (code ${event.statusCode})`
+            : event.error;
+        this.emitConnection(event.state, errorMessage);
       }),
       module.addListener("onPeersChanged", (event) => {
         this.peers = event.peers;
@@ -50,11 +54,13 @@ export class AndroidNearbyTransport implements MeshTransport {
             listener(envelope);
           }
         } catch {
+          console.warn("[ConcertNearbyMesh] invalid envelope payload");
           this.emitConnection("error", "Received an invalid nearby envelope.");
         }
       }),
     ];
 
+    console.info("[ConcertNearbyMesh] startSession", context.event.id, context.user.handle);
     await module.startSession(
       context.event.id,
       context.user.id,
@@ -89,6 +95,7 @@ export class AndroidNearbyTransport implements MeshTransport {
       throw new Error("Android nearby transport is unavailable in this build.");
     }
 
+    console.info("[ConcertNearbyMesh] sendEnvelope", envelope.id);
     await module.sendEnvelope(JSON.stringify(envelope));
   }
 

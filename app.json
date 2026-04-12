@@ -33,6 +33,11 @@
         "CHANGE_WIFI_STATE",
         "NEARBY_WIFI_DEVICES"
       ]
+    },
+    "extra": {
+      "eas": {
+        "projectId": "98a2a40b-cc02-42bb-ad0e-bd54fbaa8b96"
+      }
     }
   }
 }
