@@ -69,6 +69,8 @@ function upsertFriend(
   payload: EventPayload,
   envelope: RelayEnvelope,
 ) {
+  // Unknown senders do not become friends automatically; the UI only updates contacts
+  // the user already accepted from the nearby list.
   const existing = friends.find((friend) => friend.id === envelope.senderId);
   const nextFriend: FriendProfile = {
     id: envelope.senderId,
@@ -132,6 +134,8 @@ function reducer(state: AppState, action: AppAction): AppState {
         },
       };
     case "queue-envelope": {
+      // Outbound messages appear immediately and stay queued until a transport
+      // echoes them back or the app reconnects later.
       const message: ChatMessage = {
         id: createId("msg"),
         senderId: state.user?.id ?? "unknown",
@@ -223,6 +227,7 @@ function reducer(state: AppState, action: AppAction): AppState {
         return state;
       }
 
+      // One verified envelope can update multiple slices of state depending on payload kind.
       const nextState: AppState = {
         ...state,
         friends: upsertFriend(
@@ -326,6 +331,7 @@ async function requestNearbyPermissions() {
     };
   }
 
+  // NEARBY_WIFI_DEVICES is only a runtime permission on newer Android releases.
   const apiLevel =
     typeof Platform.Version === "number"
       ? Platform.Version
@@ -367,6 +373,8 @@ function buildPayload(
   kind: EventPayload["kind"],
   body: string,
 ): EventPayload {
+  // Chat and location-style updates all reuse the same event payload shape so
+  // the transport and crypto layers do not need to care about feature-specific semantics.
   return {
     kind,
     body,
@@ -423,6 +431,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    // The provider is the coordinator between persisted app state and the active transport adapter.
     const transport = createTransport(state.transportMode);
     transportRef.current = transport;
 
@@ -454,6 +463,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
 
       try {
+        // Verify before decrypting so bogus relay traffic is dropped cheaply.
         const plaintext = decryptPayload(
           envelope.ciphertext,
           envelope.nonce,
@@ -553,6 +563,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
+        // Sending is a three-step flow: build app payload -> wrap/sign relay envelope -> hand to transport.
         const payload = buildPayload(state, state.user, "chat", text.trim());
         const envelope = createRelayEnvelope(
           JSON.stringify(payload),

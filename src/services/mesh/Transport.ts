@@ -1,3 +1,5 @@
+// Each transport implementation plugs into the app through this contract so the
+// state layer does not care whether messages arrived via demo, relay, or nearby radios.
 import type {
   EventRecord,
   RelayEnvelope,

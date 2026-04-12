@@ -6,6 +6,7 @@ import { createId } from "../../utils/ids";
 const MAX_TTL = 4;
 
 export function createRelayEnvelope(payload: string, user: UserIdentity, event: EventRecord): RelayEnvelope {
+  // The envelope is the transport-level unit that moves through the mesh.
   const { ciphertext, nonce } = encryptPayload(payload, event.sharedKey);
   const createdAt = new Date().toISOString();
   const envelope = {

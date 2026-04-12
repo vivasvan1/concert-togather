@@ -6,6 +6,7 @@ import type { RelayEnvelope, UserIdentity } from "../../types/domain";
 import { createId } from "../../utils/ids";
 
 export function createUserIdentity(handle: string): UserIdentity {
+  // For this prototype, a user identity is a signing keypair bound to a chosen handle.
   const keyPair = nacl.sign.keyPair();
 
   return {
@@ -22,6 +23,7 @@ export function createEventSharedKey() {
 }
 
 export function encryptPayload(message: string, sharedKey: string) {
+  // The event shared key encrypts the payload; relay peers only ever see ciphertext.
   const nonce = nacl.randomBytes(nacl.secretbox.nonceLength);
   const key = decodeBase64(sharedKey);
   const box = nacl.secretbox(decodeUTF8(message), nonce, key);
@@ -50,6 +52,7 @@ export function signEnvelopePayload(
   envelope: Pick<RelayEnvelope, "ciphertext" | "nonce" | "dedupeKey" | "eventId" | "createdAt" | "senderId" | "senderPublicKey">,
   secretKey: string,
 ) {
+  // Sign the relay metadata too, not just the plaintext, so receivers can reject forged envelopes.
   const payload = `${envelope.eventId}:${envelope.senderId}:${envelope.senderPublicKey}:${envelope.dedupeKey}:${envelope.nonce}:${envelope.ciphertext}:${envelope.createdAt}`;
   const signature = nacl.sign.detached(decodeUTF8(payload), decodeBase64(secretKey));
 

@@ -36,6 +36,7 @@ export class AndroidNearbyTransport implements MeshTransport {
     await this.stop();
 
     this.subscriptions = [
+      // JS subscribes to normalized native events and re-emits them through the shared transport interface.
       module.addListener("onConnectionStateChanged", (event) => {
         const errorMessage =
           typeof event.statusCode === "number" && event.error

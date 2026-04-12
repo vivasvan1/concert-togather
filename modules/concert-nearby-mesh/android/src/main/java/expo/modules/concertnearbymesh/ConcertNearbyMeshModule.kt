@@ -30,6 +30,8 @@ private const val MODULE_NAME = "ConcertNearbyMesh"
 private const val SERVICE_ID = "concert.mesh.v1"
 private val STRATEGY = Strategy.P2P_CLUSTER
 
+// Android bridge around Google Nearby Connections. It exposes a small set of JS
+// events so the rest of the app can stay transport-agnostic.
 data class NearbyPeer(
   val endpointId: String,
   val userId: String,
@@ -62,6 +64,8 @@ class ConcertNearbyMeshModule : Module() {
 
     AsyncFunction("startSession") { eventId: String, userId: String, alias: String ->
       Log.i(MODULE_NAME, "startSession eventId=$eventId userId=$userId alias=$alias")
+      // Rebuilding the session from scratch keeps endpoint caches aligned with
+      // the currently selected event and user identity.
       stopActiveSession()
 
       activeEventId = eventId
@@ -234,6 +238,7 @@ class ConcertNearbyMeshModule : Module() {
         "onConnectionResult endpointId=$endpointId status=${result.status.statusCode} message=${result.status.statusMessage}"
       )
       if (result.status.statusCode == ConnectionsStatusCodes.STATUS_OK) {
+        // Only surface peers to JS after Nearby fully accepts the connection.
         val peer = discoveredPeers[endpointId]
         if (peer != null) {
           peer.lastSeenAt = nowIso()
@@ -279,6 +284,7 @@ class ConcertNearbyMeshModule : Module() {
         return
       }
 
+      // JS owns envelope verification/decryption; native just forwards the raw bytes.
       val bytes = payload.asBytes() ?: return
       val envelopeJson = String(bytes, StandardCharsets.UTF_8)
       Log.i(MODULE_NAME, "onPayloadReceived bytes=${bytes.size}")

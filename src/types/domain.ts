@@ -1,3 +1,4 @@
+// Shared domain model used by UI, storage, crypto, and transport code.
 export type TransportKind =
   | "bluetooth"
   | "wifi-direct"
