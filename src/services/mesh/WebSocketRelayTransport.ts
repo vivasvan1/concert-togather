@@ -44,7 +44,7 @@ export class WebSocketRelayTransport implements MeshTransport {
             type: "join",
             eventId: context.event.id,
             userId: context.user.id,
-            alias: context.user.handle,
+            alias: context.user.phoneNumberDisplay,
           } satisfies RelayMessage),
         );
         resolve();

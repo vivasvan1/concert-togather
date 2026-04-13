@@ -9,13 +9,13 @@ export class DemoCompositeMeshTransport implements MeshTransport {
   private peers: TransportPeer[] = [
     {
       id: "peer-arya",
-      alias: "arya-phone",
+      alias: "+1 415 555 0101",
       lastSeenAt: new Date().toISOString(),
       via: "bluetooth",
     },
     {
       id: "peer-rahul",
-      alias: "rahul-android",
+      alias: "+1 415 555 0102",
       lastSeenAt: new Date().toISOString(),
       via: "wifi-direct",
     },

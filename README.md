@@ -65,6 +65,32 @@ This does:
 
 This is usually much faster than rerunning `eas build --local` every time.
 
+## GitHub Release APK
+
+This repo now includes a GitHub Actions workflow that builds an Android APK and attaches it to a GitHub Release whenever you push a tag that starts with `v`.
+
+### Publish a release
+
+```bash
+git add .
+git commit -m "Prepare release"
+git push origin main
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+After the tag is pushed, GitHub Actions will:
+
+- install dependencies
+- run type-checking
+- build `android/app/build/outputs/apk/release/app-release.apk`
+- create a GitHub Release for the tag
+- attach `concert-togather-v0.1.0.apk` to the release
+
+### Important note
+
+The current Android `release` build is signed with the debug keystore in [android/app/build.gradle](./android/app/build.gradle). That is fine for internal testing and easy installs from GitHub Releases, but it is not appropriate for Play Store or long-term production distribution.
+
 ### Test with 2 phones
 
 1. Install the APK on both devices.

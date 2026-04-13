@@ -61,11 +61,15 @@ export class AndroidNearbyTransport implements MeshTransport {
       }),
     ];
 
-    console.info("[ConcertNearbyMesh] startSession", context.event.id, context.user.handle);
+    console.info(
+      "[ConcertNearbyMesh] startSession",
+      context.event.id,
+      context.user.phoneNumberDisplay,
+    );
     await module.startSession(
       context.event.id,
       context.user.id,
-      context.user.handle,
+      context.user.phoneNumberDisplay,
     );
   }
 

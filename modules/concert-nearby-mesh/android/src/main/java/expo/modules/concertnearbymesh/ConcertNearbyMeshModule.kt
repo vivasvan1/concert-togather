@@ -42,6 +42,7 @@ data class NearbyPeer(
 class ConcertNearbyMeshModule : Module() {
   private val discoveredPeers = ConcurrentHashMap<String, NearbyPeer>()
   private val connectedPeers = ConcurrentHashMap<String, NearbyPeer>()
+  private val connectingPeerIds = ConcurrentHashMap.newKeySet<String>()
 
   private var activeEventId: String? = null
   private var activeUserId: String? = null
@@ -171,16 +172,39 @@ class ConcertNearbyMeshModule : Module() {
         lastSeenAt = nowIso()
       )
 
+      if (connectedPeers.containsKey(endpointId) || connectingPeerIds.contains(endpointId)) {
+        Log.i(MODULE_NAME, "Ignoring already-active endpointId=$endpointId")
+        return
+      }
+
+      if (!shouldInitiateConnection(endpoint.userId)) {
+        Log.i(
+          MODULE_NAME,
+          "Waiting for remote side to initiate endpointId=$endpointId remoteUserId=${endpoint.userId}"
+        )
+        return
+      }
+
+      connectingPeerIds.add(endpointId)
       connectionsClient.requestConnection(
         activeAlias ?: "concert-user",
         endpointId,
         connectionLifecycleCallback
       ).addOnFailureListener { error ->
+        connectingPeerIds.remove(endpointId)
         Log.w(MODULE_NAME, "Request connection failed for $endpointId", error)
+        val statusCode = getStatusCode(error)
+        if (statusCode == ConnectionsStatusCodes.STATUS_ENDPOINT_IO_ERROR) {
+          Log.i(
+            MODULE_NAME,
+            "Suppressing transient endpoint IO error for endpointId=$endpointId while Nearby resolves collision/retry"
+          )
+          return@addOnFailureListener
+        }
         emitConnectionState(
           "error",
           describeError("Nearby request connection failed", error),
-          getStatusCode(error)
+          statusCode
         )
       }
       Log.i(MODULE_NAME, "requestConnection started endpointId=$endpointId alias=${endpoint.alias}")
@@ -188,6 +212,7 @@ class ConcertNearbyMeshModule : Module() {
 
     override fun onEndpointLost(endpointId: String) {
       Log.i(MODULE_NAME, "onEndpointLost endpointId=$endpointId")
+      connectingPeerIds.remove(endpointId)
       discoveredPeers.remove(endpointId)
       connectedPeers.remove(endpointId)
       emitPeersChanged()
@@ -225,6 +250,7 @@ class ConcertNearbyMeshModule : Module() {
         discoveredPeer.lastSeenAt = nowIso()
       }
 
+      connectingPeerIds.add(endpointId)
       connectionsClient.acceptConnection(endpointId, payloadCallback)
       Log.i(
         MODULE_NAME,
@@ -237,6 +263,7 @@ class ConcertNearbyMeshModule : Module() {
         MODULE_NAME,
         "onConnectionResult endpointId=$endpointId status=${result.status.statusCode} message=${result.status.statusMessage}"
       )
+      connectingPeerIds.remove(endpointId)
       if (result.status.statusCode == ConnectionsStatusCodes.STATUS_OK) {
         // Only surface peers to JS after Nearby fully accepts the connection.
         val peer = discoveredPeers[endpointId]
@@ -251,6 +278,7 @@ class ConcertNearbyMeshModule : Module() {
           MODULE_NAME,
           "Nearby connection failed with status ${result.status.statusCode}: ${result.status.statusMessage}"
         )
+        discoveredPeers.remove(endpointId)
         connectedPeers.remove(endpointId)
         emitPeersChanged()
         emitConnectionState(
@@ -263,7 +291,9 @@ class ConcertNearbyMeshModule : Module() {
 
     override fun onDisconnected(endpointId: String) {
       Log.i(MODULE_NAME, "onDisconnected endpointId=$endpointId")
+      connectingPeerIds.remove(endpointId)
       connectedPeers.remove(endpointId)
+      discoveredPeers.remove(endpointId)
       emitPeersChanged()
       if (connectedPeers.isEmpty()) {
         emitConnectionState("connecting", null)
@@ -303,6 +333,7 @@ class ConcertNearbyMeshModule : Module() {
     Log.i(MODULE_NAME, "stopActiveSession")
     discoveredPeers.clear()
     connectedPeers.clear()
+    connectingPeerIds.clear()
 
     try {
       connectionsClient.stopAllEndpoints()
@@ -353,6 +384,11 @@ class ConcertNearbyMeshModule : Module() {
   private fun describeError(prefix: String, error: Throwable): String {
     val suffix = error.message?.takeIf { it.isNotBlank() } ?: error.javaClass.simpleName
     return "$prefix: $suffix"
+  }
+
+  private fun shouldInitiateConnection(remoteUserId: String): Boolean {
+    val localUserId = activeUserId ?: return false
+    return localUserId < remoteUserId
   }
 
   private fun buildEndpointName(eventId: String, userId: String, alias: String): String {

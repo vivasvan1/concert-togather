@@ -17,16 +17,20 @@ export function createSeedState(): AppState {
     },
     friends: [],
     messages: [],
-    locationHints: {},
     transportPeers: [],
     queue: [],
     deliveryHealth: "degraded",
-    activeMeetupSpot: "Sound Booth",
+    relayStats: {
+      forwardedEnvelopeCount: 0,
+    },
+    contacts: [],
+    contactsPermissionState: "unknown",
     transportMode: "nearby-android",
     relayServerUrl: "ws://192.168.1.10:8787",
     transportConnectionState: "permission-required",
     nearbyPermissionState: "unknown",
     nearbyEnabled: false,
     seenEnvelopeIds: [],
+    selectedChatFriendId: undefined,
   };
 }

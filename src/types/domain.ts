@@ -16,27 +16,58 @@ export type TransportConnectionState =
 
 export type NearbyPermissionState = "unknown" | "granted" | "denied";
 
-export type DeliveryState = "local" | "relayed" | "confirmed" | "stale";
+export type ContactsPermissionState = "unknown" | "granted" | "denied";
+
+export type DeliveryState = "sending" | "sent" | "delivered" | "read";
 
 export type AvailabilityState = "online" | "degraded" | "offline";
 
-export type FriendStatus = "safe" | "moving" | "at-stage" | "at-exit" | "at-merch" | "need-help";
+export type ChatRequestStatus =
+  | "accepted"
+  | "outgoing-pending"
+  | "incoming-pending"
+  | "declined"
+  | "invitable-unregistered";
+
+export type MessageKind =
+  | "friend-request"
+  | "friend-approval"
+  | "chat"
+  | "delivery-receipt"
+  | "read-receipt"
+  | "sync-state";
 
 export interface UserIdentity {
   id: string;
-  handle: string;
+  phoneNumber: string;
+  phoneNumberDisplay: string;
   displayName: string;
   publicKey: string;
   secretKey: string;
+  encryptionPublicKey: string;
+  encryptionSecretKey: string;
 }
 
 export interface FriendProfile {
   id: string;
-  handle: string;
+  phoneNumber: string;
+  phoneNumberDisplay: string;
   displayName: string;
   publicKey: string;
-  status: FriendStatus;
+  encryptionPublicKey: string;
+  chatStatus: ChatRequestStatus;
   lastSeenAt: string;
+  requestedAt?: string;
+  approvedAt?: string;
+}
+
+export interface DeviceContact {
+  id: string;
+  displayName: string;
+  phoneNumber: string;
+  phoneNumberDisplay: string;
+  matchStatus: "matched" | "invite";
+  matchedFriendId?: string;
 }
 
 export interface EventRecord {
@@ -48,29 +79,21 @@ export interface EventRecord {
   sharedKey: string;
 }
 
-export interface PeerLocationHint {
-  friendId: string;
-  updatedAt: string;
-  meetupSpot?: string;
-  gps?: {
-    latitude: number;
-    longitude: number;
-    accuracyMeters: number;
-  };
-  proximity?: {
-    estimate: "adjacent" | "nearby" | "same-zone";
-    confidence: number;
-  };
-}
-
 export interface ChatMessage {
   id: string;
+  kind: "chat";
   senderId: string;
   senderLabel: string;
   eventId: string;
+  conversationId: string;
+  messageId: string;
+  recipientIds: string[];
   ciphertext: string;
   plaintextPreview: string;
   createdAt: string;
+  deliveredAt?: string;
+  readAt?: string;
+  unread: boolean;
   deliveryState: DeliveryState;
   hopCount: number;
 }
@@ -80,7 +103,11 @@ export interface RelayEnvelope {
   eventId: string;
   senderId: string;
   senderPublicKey: string;
-  recipientScope: "event-group";
+  senderEncryptionPublicKey: string;
+  recipientScope: "direct" | "group";
+  encryptionMode: "event-shared" | "direct";
+  recipientIds: string[];
+  groupId?: string;
   ciphertext: string;
   signature: string;
   nonce: string;
@@ -101,6 +128,8 @@ export interface MeshCapability {
 export interface TransportPeer {
   id: string;
   alias: string;
+  phoneNumber?: string;
+  phoneNumberDisplay?: string;
   lastSeenAt: string;
   via: TransportKind;
 }
@@ -116,11 +145,14 @@ export interface AppState {
   event?: EventRecord;
   friends: FriendProfile[];
   messages: ChatMessage[];
-  locationHints: Record<string, PeerLocationHint>;
   transportPeers: TransportPeer[];
   queue: OutboundQueueItem[];
   deliveryHealth: AvailabilityState;
-  activeMeetupSpot: string;
+  relayStats: {
+    forwardedEnvelopeCount: number;
+  };
+  contacts: DeviceContact[];
+  contactsPermissionState: ContactsPermissionState;
   transportMode: TransportMode;
   relayServerUrl: string;
   transportConnectionState: TransportConnectionState;
@@ -128,16 +160,68 @@ export interface AppState {
   nearbyPermissionState: NearbyPermissionState;
   nearbyEnabled: boolean;
   seenEnvelopeIds: string[];
+  selectedChatFriendId?: string;
 }
 
-export interface EventPayload {
-  kind: "chat" | "meetup" | "status";
-  body: string;
-  senderHandle: string;
-  senderLabel: string;
-  sentAt: string;
-  meetupSpot?: string;
-  status?: FriendStatus;
-  gps?: PeerLocationHint["gps"];
-  proximity?: PeerLocationHint["proximity"];
-}
+export type EventPayload =
+  | {
+      kind: "friend-request";
+      senderPhoneNumber: string;
+      senderPhoneNumberDisplay: string;
+      senderLabel: string;
+      sentAt: string;
+      encryptionPublicKey: string;
+    }
+  | {
+      kind: "friend-approval";
+      senderPhoneNumber: string;
+      senderPhoneNumberDisplay: string;
+      senderLabel: string;
+      sentAt: string;
+      approved: true;
+      encryptionPublicKey: string;
+    }
+  | {
+      kind: "chat";
+      messageId: string;
+      body: string;
+      senderPhoneNumber: string;
+      senderPhoneNumberDisplay: string;
+      senderLabel: string;
+      sentAt: string;
+    }
+  | {
+      kind: "delivery-receipt";
+      messageId: string;
+      senderPhoneNumber: string;
+      senderPhoneNumberDisplay: string;
+      senderLabel: string;
+      sentAt: string;
+      deliveredAt: string;
+    }
+  | {
+      kind: "read-receipt";
+      messageId: string;
+      senderPhoneNumber: string;
+      senderPhoneNumberDisplay: string;
+      senderLabel: string;
+      sentAt: string;
+      readAt: string;
+    }
+  | {
+      kind: "sync-state";
+      senderPhoneNumber: string;
+      senderPhoneNumberDisplay: string;
+      senderLabel: string;
+      sentAt: string;
+      conversationId: string;
+      messages: Array<{
+        messageId: string;
+        senderId: string;
+        senderLabel: string;
+        body: string;
+        sentAt: string;
+        deliveredAt?: string;
+        readAt?: string;
+      }>;
+    };

@@ -12,6 +12,7 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
+        "NSContactsUsageDescription": "Concert Togather uses your contacts so you can start chats by phone number and send request-based invites.",
         "NSLocationWhenInUseUsageDescription": "Concert Togather uses your location to help friends find your meetup spot when service is weak."
       }
     },
@@ -31,7 +32,8 @@
         "BLUETOOTH_SCAN",
         "ACCESS_WIFI_STATE",
         "CHANGE_WIFI_STATE",
-        "NEARBY_WIFI_DEVICES"
+        "NEARBY_WIFI_DEVICES",
+        "READ_CONTACTS"
       ]
     },
     "extra": {
