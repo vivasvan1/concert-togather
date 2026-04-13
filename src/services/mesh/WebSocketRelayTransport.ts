@@ -19,6 +19,9 @@ type RelayMessage =
 
 export class WebSocketRelayTransport implements MeshTransport {
   private socket?: WebSocket;
+  private reconnectTimer?: ReturnType<typeof setTimeout>;
+  private stopped = true;
+  private context?: TransportRuntimeContext;
   private peers: TransportPeer[] = [];
   private envelopeListeners = new Set<(envelope: RelayEnvelope) => void>();
   private peerListeners = new Set<(peers: TransportPeer[]) => void>();
@@ -26,64 +29,30 @@ export class WebSocketRelayTransport implements MeshTransport {
 
   async start(context: TransportRuntimeContext) {
     if (!context.relayServerUrl.trim()) {
-      this.emitConnection("error", "Set a relay URL before connecting.");
+      this.context = context;
+      this.stopped = false;
+      this.peers = [];
+      this.emitPeers();
+      this.emitConnection("disconnected");
       return;
     }
 
     await this.stop();
-    this.emitConnection("connecting");
-
-    await new Promise<void>((resolve) => {
-      const socket = new WebSocket(context.relayServerUrl);
-      this.socket = socket;
-
-      socket.onopen = () => {
-        this.emitConnection("connected");
-        socket.send(
-          JSON.stringify({
-            type: "join",
-            eventId: context.event.id,
-            userId: context.user.id,
-            alias: context.user.phoneNumberDisplay,
-          } satisfies RelayMessage),
-        );
-        resolve();
-      };
-
-      socket.onmessage = (event) => {
-        try {
-          const message = JSON.parse(String(event.data)) as RelayMessage;
-
-          if (message.type === "presence") {
-            this.peers = message.peers;
-            this.emitPeers();
-            return;
-          }
-
-          if (message.type === "envelope") {
-            for (const listener of this.envelopeListeners) {
-              listener(message.envelope);
-            }
-          }
-        } catch {
-          this.emitConnection("error", "Received an invalid relay payload.");
-        }
-      };
-
-      socket.onerror = () => {
-        this.emitConnection("error", "Unable to reach the relay server.");
-        resolve();
-      };
-
-      socket.onclose = () => {
-        this.emitConnection("disconnected");
-      };
-    });
+    this.context = context;
+    this.stopped = false;
+    this.connect();
   }
 
   async stop() {
+    this.stopped = true;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = undefined;
+    }
     this.socket?.close();
     this.socket = undefined;
+    this.peers = [];
+    this.emitPeers();
   }
 
   getPeers() {
@@ -136,5 +105,84 @@ export class WebSocketRelayTransport implements MeshTransport {
     for (const listener of this.connectionListeners) {
       listener(state, error);
     }
+  }
+
+  private connect() {
+    const context = this.context;
+    if (!context || this.stopped || !context.relayServerUrl.trim()) {
+      return;
+    }
+
+    if (
+      this.socket &&
+      (this.socket.readyState === WebSocket.OPEN || this.socket.readyState === WebSocket.CONNECTING)
+    ) {
+      return;
+    }
+
+    this.emitConnection("connecting");
+
+    const socket = new WebSocket(context.relayServerUrl);
+    this.socket = socket;
+
+    socket.onopen = () => {
+      this.emitConnection("connected");
+      socket.send(
+        JSON.stringify({
+          type: "join",
+          eventId: context.event.id,
+          userId: context.user.id,
+          alias: context.user.phoneNumberDisplay,
+        } satisfies RelayMessage),
+      );
+    };
+
+    socket.onmessage = (event) => {
+      try {
+        const message = JSON.parse(String(event.data)) as RelayMessage;
+
+        if (message.type === "presence") {
+          this.peers = message.peers;
+          this.emitPeers();
+          return;
+        }
+
+        if (message.type === "envelope") {
+          for (const listener of this.envelopeListeners) {
+            listener(message.envelope);
+          }
+        }
+      } catch {
+        this.emitConnection("error", "Received an invalid relay payload.");
+      }
+    };
+
+    socket.onerror = () => {
+      this.emitConnection("error", "Unable to reach the relay server.");
+    };
+
+    socket.onclose = () => {
+      this.socket = undefined;
+      this.peers = [];
+      this.emitPeers();
+      if (this.stopped) {
+        this.emitConnection("disconnected");
+        return;
+      }
+
+      this.emitConnection("connecting", "Waiting for internet relay.");
+      this.scheduleReconnect();
+    };
+  }
+
+  private scheduleReconnect() {
+    if (this.reconnectTimer || this.stopped) {
+      return;
+    }
+
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = undefined;
+      this.connect();
+    }, 3000);
   }
 }

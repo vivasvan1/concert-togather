@@ -18,6 +18,7 @@ import {
 } from "../services/crypto/CryptoService";
 import { AndroidNearbyTransport } from "../services/mesh/AndroidNearbyTransport";
 import { DemoCompositeMeshTransport } from "../services/mesh/DemoCompositeMeshTransport";
+import { HybridMeshTransport } from "../services/mesh/HybridMeshTransport";
 import {
   createControlRelayEnvelope,
   createDirectRelayEnvelope,
@@ -67,7 +68,6 @@ type AppAction =
   | { type: "set-peers"; payload: TransportPeer[] }
   | { type: "set-transport-mode"; payload: TransportMode }
   | { type: "set-relay-url"; payload: string }
-  | { type: "set-nearby-enabled"; payload: boolean }
   | { type: "set-nearby-permission-state"; payload: NearbyPermissionState }
   | {
       type: "set-transport-connection";
@@ -335,7 +335,7 @@ function mergeHydratedState(base: AppState, persisted: any): AppState {
       persisted?.contactsPermissionState ?? base.contactsPermissionState,
     nearbyPermissionState:
       persisted?.nearbyPermissionState ?? base.nearbyPermissionState,
-    nearbyEnabled: persisted?.nearbyEnabled ?? base.nearbyEnabled,
+    transportMode: "hybrid",
     seenEnvelopeIds: persisted?.seenEnvelopeIds ?? [],
     selectedChatFriendId:
       persisted?.selectedChatFriendId ?? base.selectedChatFriendId,
@@ -560,27 +560,14 @@ function reducer(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         transportMode: action.payload,
-        nearbyEnabled:
-          action.payload === "nearby-android" ? state.nearbyEnabled : false,
         transportPeers: [],
-        transportConnectionState:
-          action.payload === "nearby-android"
-            ? "permission-required"
-            : "disconnected",
-        transportError:
-          action.payload === "nearby-android"
-            ? "Grant nearby permissions and tap Start Nearby."
-            : undefined,
+        transportConnectionState: "disconnected",
+        transportError: undefined,
       };
     case "set-relay-url":
       return {
         ...state,
         relayServerUrl: action.payload,
-      };
-    case "set-nearby-enabled":
-      return {
-        ...state,
-        nearbyEnabled: action.payload,
       };
     case "set-nearby-permission-state":
       return {
@@ -847,15 +834,33 @@ interface AppContextValue {
   declineFriendRequest: (friendId: string) => void;
   sendChatMessage: (friendId: string, text: string) => Promise<void>;
   setSelectedChatFriend: (friendId?: string) => Promise<void>;
-  setTransportMode: (mode: TransportMode) => void;
   setRelayServerUrl: (url: string) => void;
-  startNearbyTransport: () => Promise<void>;
-  stopNearbyTransport: () => Promise<void>;
+  requestNearbyAccess: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextValue | undefined>(undefined);
 
-function createTransport(mode: TransportMode): MeshTransport {
+function createTransport(
+  mode: TransportMode,
+  nearbyPermissionState: NearbyPermissionState,
+  relayServerUrl: string,
+): MeshTransport {
+  if (mode === "hybrid") {
+    const transports: Array<{ key: string; transport: MeshTransport }> = [];
+    if (Platform.OS === "android" && nearbyPermissionState === "granted") {
+      transports.push({ key: "nearby", transport: new AndroidNearbyTransport() });
+    }
+    if (relayServerUrl.trim()) {
+      transports.push({ key: "relay", transport: new WebSocketRelayTransport() });
+    }
+
+    if (transports.length === 0) {
+      return new WebSocketRelayTransport();
+    }
+
+    return new HybridMeshTransport(transports);
+  }
+
   if (mode === "nearby-android") {
     return new AndroidNearbyTransport();
   }
@@ -869,7 +874,7 @@ function createTransport(mode: TransportMode): MeshTransport {
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(reducer, undefined, createSeedState);
-  const transportRef = useRef<MeshTransport>(createTransport("demo"));
+  const transportRef = useRef<MeshTransport>(createTransport("hybrid", "unknown", ""));
   const stateRef = useRef(state);
   const syncSentAtRef = useRef<Record<string, number>>({});
   const queueAttemptedAtRef = useRef<Record<string, number>>({});
@@ -898,22 +903,63 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [state]);
 
   useEffect(() => {
+    if (!state.user || Platform.OS !== "android") {
+      return;
+    }
+
+    if (state.nearbyPermissionState !== "unknown") {
+      return;
+    }
+
+    requestNearbyPermissions()
+      .then((result) => {
+        dispatch({
+          type: "set-nearby-permission-state",
+          payload: result.state,
+        });
+
+        if (!result.granted && !stateRef.current.relayServerUrl.trim()) {
+          dispatch({
+            type: "set-transport-connection",
+            payload: {
+              state: "permission-required",
+              error: "Nearby permissions are required to discover phones directly.",
+            },
+          });
+        }
+      })
+      .catch(() => undefined);
+  }, [state.nearbyPermissionState, state.user]);
+
+  useEffect(() => {
     if (!state.user || !state.event) {
       return;
     }
 
-    if (state.transportMode === "nearby-android" && !state.nearbyEnabled) {
+    if (
+      state.transportMode === "hybrid" &&
+      state.nearbyPermissionState !== "granted" &&
+      !state.relayServerUrl.trim()
+    ) {
+      dispatch({
+        type: "set-peers",
+        payload: [],
+      });
       dispatch({
         type: "set-transport-connection",
         payload: {
           state: "permission-required",
-          error: "Grant nearby permissions and tap Start Nearby.",
+          error: "Nearby permissions are required to discover phones directly.",
         },
       });
       return;
     }
 
-    const transport = createTransport(state.transportMode);
+    const transport = createTransport(
+      state.transportMode,
+      state.nearbyPermissionState,
+      state.relayServerUrl,
+    );
     transportRef.current = transport;
 
     const unsubscribeEnvelope = transport.onEnvelope((envelope) => {
@@ -1083,7 +1129,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       unsubscribeConnection();
       transport.stop().catch(() => undefined);
     };
-  }, [state.event, state.nearbyEnabled, state.relayServerUrl, state.transportMode, state.user]);
+  }, [
+    state.event,
+    state.nearbyPermissionState,
+    state.relayServerUrl,
+    state.transportMode,
+    state.user,
+  ]);
 
   useEffect(() => {
     const currentState = stateRef.current;
@@ -1182,6 +1234,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         dispatch({
           type: "set-user",
           payload: createUserIdentity(normalized, displayName),
+        });
+        dispatch({
+          type: "set-transport-mode",
+          payload: "hybrid",
         });
       },
       async syncContacts() {
@@ -1415,19 +1471,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           transportRef.current.send(envelope).catch(() => undefined);
         }
       },
-      setTransportMode(mode) {
-        dispatch({
-          type: "set-transport-mode",
-          payload: mode,
-        });
-      },
       setRelayServerUrl(url) {
         dispatch({
           type: "set-relay-url",
-          payload: url,
+          payload: url.trim(),
         });
       },
-      async startNearbyTransport() {
+      async requestNearbyAccess() {
         const result = await requestNearbyPermissions();
 
         dispatch({
@@ -1440,33 +1490,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             type: "set-transport-connection",
             payload: {
               state: "permission-required",
-              error: "Nearby permissions are required before scanning can start.",
+              error: "Nearby permissions are required before phones can be discovered directly.",
             },
           });
-          return;
         }
-
-        dispatch({
-          type: "set-nearby-enabled",
-          payload: true,
-        });
-      },
-      async stopNearbyTransport() {
-        dispatch({
-          type: "set-nearby-enabled",
-          payload: false,
-        });
-        dispatch({
-          type: "set-peers",
-          payload: [],
-        });
-        dispatch({
-          type: "set-transport-connection",
-          payload: {
-            state: "permission-required",
-            error: "Grant nearby permissions and tap Start Nearby.",
-          },
-        });
       },
     }),
     [state],

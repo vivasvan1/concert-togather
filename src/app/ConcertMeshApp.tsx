@@ -16,7 +16,12 @@ import { getPlatformCapabilities } from "../services/platform/capabilities";
 import { useAppState } from "../state/AppContext";
 import type { ChatMessage, DeliveryState, DeviceContact, FriendProfile } from "../types/domain";
 import { formatTimeLabel, minutesAgo } from "../utils/date";
-import { formatPhoneNumber, isLikelyPhoneNumber, normalizePhoneNumber } from "../utils/phone";
+import {
+  formatPhoneNumber,
+  isLikelyPhoneNumber,
+  normalizePhoneNumber,
+  normalizePhoneNumberParts,
+} from "../utils/phone";
 
 type TabKey = "chats" | "discover" | "status";
 
@@ -92,36 +97,29 @@ function getConversationSortBucket(friend: FriendProfile, unreadCount: number) {
 }
 
 function getNearbyServiceLine(
-  transportMode: string,
   transportConnectionState: string,
+  nearbyPermissionState: string,
   transportError?: string,
 ) {
-  const isNearbyContext =
-    transportMode === "nearby-android" || transportConnectionState === "error";
-
-  if (!isNearbyContext) {
-    return undefined;
-  }
-
   if (transportConnectionState === "error") {
     return transportError
-      ? `Nearby delivery error: ${transportError}`
-      : "Nearby delivery error";
+      ? `Delivery issue: ${transportError}`
+      : "Delivery issue";
   }
 
   if (transportConnectionState === "connected") {
-    return "Nearby delivery is active";
+    return "Nearby and internet assist are active";
   }
 
   if (transportConnectionState === "connecting") {
-    return "Nearby delivery is connecting";
+    return "Trying nearby and internet assist";
   }
 
-  if (transportConnectionState === "permission-required") {
-    return transportError || "Nearby delivery is waiting for permissions";
+  if (nearbyPermissionState !== "granted") {
+    return transportError || "Nearby delivery is waiting for Android permissions";
   }
 
-  return "Nearby delivery is offline";
+  return "Nearby is active. Internet relay connects when reachable";
 }
 
 export function ConcertMeshApp() {
@@ -134,12 +132,11 @@ export function ConcertMeshApp() {
     declineFriendRequest,
     sendChatMessage,
     setSelectedChatFriend,
-    setTransportMode,
     setRelayServerUrl,
-    startNearbyTransport,
-    stopNearbyTransport,
+    requestNearbyAccess,
   } = useAppState();
   const [activeTab, setActiveTab] = useState<TabKey>("chats");
+  const [countryCode, setCountryCode] = useState("+91");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [profileName, setProfileName] = useState("");
   const [draft, setDraft] = useState("");
@@ -305,8 +302,8 @@ export function ConcertMeshApp() {
   }, [searchQuery, state.contacts, state.friends, state.transportPeers]);
 
   const nearbyServiceLine = getNearbyServiceLine(
-    state.transportMode,
     state.transportConnectionState,
+    state.nearbyPermissionState,
     state.transportError,
   );
 
@@ -348,7 +345,7 @@ export function ConcertMeshApp() {
   }
 
   if (!state.user) {
-    const normalizedPhone = normalizePhoneNumber(phoneNumber);
+    const normalizedPhone = normalizePhoneNumberParts(countryCode, phoneNumber);
 
     return (
       <SafeAreaView style={styles.safeArea}>
@@ -359,14 +356,24 @@ export function ConcertMeshApp() {
             Chats stay request-based. People can find you by number, but they still
             need your approval before messaging opens.
           </Text>
-          <TextInput
-            value={phoneNumber}
-            onChangeText={setPhoneNumber}
-            style={styles.input}
-            placeholder="+1 415 555 0100"
-            placeholderTextColor="#6F7E90"
-            keyboardType="phone-pad"
-          />
+          <View style={styles.phoneRow}>
+            <TextInput
+              value={countryCode}
+              onChangeText={setCountryCode}
+              style={[styles.input, styles.countryCodeInput]}
+              placeholder="+91"
+              placeholderTextColor="#6F7E90"
+              keyboardType="phone-pad"
+            />
+            <TextInput
+              value={phoneNumber}
+              onChangeText={setPhoneNumber}
+              style={[styles.input, styles.phoneInput]}
+              placeholder="98765 43210"
+              placeholderTextColor="#6F7E90"
+              keyboardType="phone-pad"
+            />
+          </View>
           <TextInput
             value={profileName}
             onChangeText={setProfileName}
@@ -638,7 +645,9 @@ export function ConcertMeshApp() {
                             <Text style={styles.rowMeta}>
                               {state.contactsPermissionState === "granted"
                                 ? `${state.contacts.length} contacts loaded`
-                                : "Import contacts to start chats by phone number."}
+                                : state.contactsPermissionState === "denied"
+                                  ? "Contacts permission is blocked. Allow it to pull numbers from your address book."
+                                  : "Import contacts to start chats by phone number."}
                             </Text>
                           </View>
                           <Pressable
@@ -651,7 +660,9 @@ export function ConcertMeshApp() {
                             <Text style={styles.secondaryLabel}>
                               {state.contactsPermissionState === "granted"
                                 ? "Refresh"
-                                : "Sync contacts"}
+                                : state.contactsPermissionState === "denied"
+                                  ? "Retry permission"
+                                  : "Sync contacts"}
                             </Text>
                           </Pressable>
                         </View>
@@ -870,20 +881,20 @@ export function ConcertMeshApp() {
                       {state.transportError ? ` · ${state.transportError}` : ""}
                     </Text>
                   </View>
-                  <Pressable
-                    onPress={
-                      state.nearbyEnabled ? stopNearbyTransport : startNearbyTransport
-                    }
-                    style={({ pressed }) => [
-                      styles.primaryButton,
-                      styles.inlinePrimary,
-                      pressed && styles.buttonPressed,
-                    ]}
-                  >
-                    <Text style={styles.primaryButtonLabel}>
-                      {state.nearbyEnabled ? "Stop" : "Start"}
-                    </Text>
-                  </Pressable>
+                  {state.nearbyPermissionState !== "granted" ? (
+                    <Pressable
+                      onPress={requestNearbyAccess}
+                      style={({ pressed }) => [
+                        styles.secondaryButton,
+                        styles.inlineSecondary,
+                        pressed && styles.buttonPressed,
+                      ]}
+                    >
+                      <Text style={styles.secondaryLabel}>Grant access</Text>
+                    </Pressable>
+                  ) : (
+                    <Text style={[styles.badge, styles.goodBadge]}>Always on</Text>
+                  )}
                 </View>
               </SectionCard>
 
@@ -925,8 +936,8 @@ export function ConcertMeshApp() {
               >
                 {state.transportPeers.length === 0 ? (
                   <Text style={styles.rowMeta}>
-                    No nearby phones yet. Start scanning on both devices and keep the
-                    app in the foreground.
+                    No nearby phones yet. Keep the app open on both devices and let
+                    discovery run in the foreground.
                   </Text>
                 ) : (
                   state.transportPeers.map((peer) => {
@@ -982,7 +993,7 @@ export function ConcertMeshApp() {
                   <View style={styles.friendMeta}>
                     <Text style={styles.rowTitle}>Transport</Text>
                     <Text style={styles.rowMeta}>
-                      {state.transportMode} · {state.transportConnectionState}
+                      Hybrid delivery · {state.transportConnectionState}
                     </Text>
                   </View>
                   <Text
@@ -1012,66 +1023,27 @@ export function ConcertMeshApp() {
               </SectionCard>
 
               <SectionCard
-                title="Transport mode"
-                subtitle="Nearby Android should be primary. Relay and demo remain as test tools."
+                title="Internet assist"
+                subtitle="Nearby stays on continuously. Configure the relay URL so queued messages can flush when internet returns."
               >
-                <View style={styles.chipWrap}>
-                  {Platform.OS === "android" ? (
-                    <Pressable
-                      onPress={() => setTransportMode("nearby-android")}
-                      style={({ pressed }) => [
-                        styles.chip,
-                        state.transportMode === "nearby-android" && styles.chipActive,
-                        pressed && styles.buttonPressed,
-                      ]}
-                    >
-                      <Text style={styles.chipLabel}>Nearby Android</Text>
-                    </Pressable>
-                  ) : null}
-                  <Pressable
-                    onPress={() => setTransportMode("relay-server")}
-                    style={({ pressed }) => [
-                      styles.chip,
-                      state.transportMode === "relay-server" && styles.chipActive,
-                      pressed && styles.buttonPressed,
-                    ]}
-                  >
-                    <Text style={styles.chipLabel}>Relay server</Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => setTransportMode("demo")}
-                    style={({ pressed }) => [
-                      styles.chip,
-                      state.transportMode === "demo" && styles.chipActive,
-                      pressed && styles.buttonPressed,
-                    ]}
-                  >
-                    <Text style={styles.chipLabel}>Demo transport</Text>
-                  </Pressable>
-                </View>
-
-                {state.transportMode === "relay-server" ? (
-                  <>
-                    <TextInput
-                      value={relayUrlDraft}
-                      onChangeText={setRelayUrlDraft}
-                      style={styles.input}
-                      placeholder="ws://192.168.x.x:8787"
-                      placeholderTextColor="#6F7E90"
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                    />
-                    <Pressable
-                      onPress={() => setRelayServerUrl(relayUrlDraft.trim())}
-                      style={({ pressed }) => [
-                        styles.secondaryButton,
-                        pressed && styles.buttonPressed,
-                      ]}
-                    >
-                      <Text style={styles.secondaryLabel}>Apply relay URL</Text>
-                    </Pressable>
-                  </>
-                ) : null}
+                <TextInput
+                  value={relayUrlDraft}
+                  onChangeText={setRelayUrlDraft}
+                  style={styles.input}
+                  placeholder="ws://192.168.x.x:8787"
+                  placeholderTextColor="#6F7E90"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                <Pressable
+                  onPress={() => setRelayServerUrl(relayUrlDraft.trim())}
+                  style={({ pressed }) => [
+                    styles.secondaryButton,
+                    pressed && styles.buttonPressed,
+                  ]}
+                >
+                  <Text style={styles.secondaryLabel}>Apply relay URL</Text>
+                </Pressable>
               </SectionCard>
 
               <SectionCard
@@ -1237,6 +1209,16 @@ const styles = StyleSheet.create({
     color: "#F3F7FB",
     paddingHorizontal: 16,
     fontSize: 15,
+  },
+  phoneRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  countryCodeInput: {
+    flex: 0.36,
+  },
+  phoneInput: {
+    flex: 1,
   },
   primaryButton: {
     minHeight: 52,

@@ -16,6 +16,14 @@
         "NSLocationWhenInUseUsageDescription": "Concert Togather uses your location to help friends find your meetup spot when service is weak."
       }
     },
+    "plugins": [
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "Concert Togather uses your contacts so you can start chats by phone number and send request-based invites."
+        }
+      ]
+    ],
     "android": {
       "package": "com.vivasvan.concerttogather",
       "versionCode": 1,

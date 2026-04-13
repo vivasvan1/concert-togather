@@ -25,11 +25,10 @@ export function createSeedState(): AppState {
     },
     contacts: [],
     contactsPermissionState: "unknown",
-    transportMode: "nearby-android",
+    transportMode: "hybrid",
     relayServerUrl: "ws://192.168.1.10:8787",
     transportConnectionState: "permission-required",
     nearbyPermissionState: "unknown",
-    nearbyEnabled: false,
     seenEnvelopeIds: [],
     selectedChatFriendId: undefined,
   };

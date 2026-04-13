@@ -5,7 +5,7 @@ export type TransportKind =
   | "internet-fallback"
   | "nearby";
 
-export type TransportMode = "demo" | "relay-server" | "nearby-android";
+export type TransportMode = "demo" | "relay-server" | "nearby-android" | "hybrid";
 
 export type TransportConnectionState =
   | "disconnected"
@@ -158,7 +158,6 @@ export interface AppState {
   transportConnectionState: TransportConnectionState;
   transportError?: string;
   nearbyPermissionState: NearbyPermissionState;
-  nearbyEnabled: boolean;
   seenEnvelopeIds: string[];
   selectedChatFriendId?: string;
 }
