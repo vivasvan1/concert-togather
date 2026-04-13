@@ -23,12 +23,11 @@ import {
   normalizePhoneNumberParts,
 } from "../utils/phone";
 
-type TabKey = "chats" | "discover" | "status";
+type TabKey = "chats" | "discover";
 
 const TABS: Array<{ key: TabKey; label: string }> = [
   { key: "chats", label: "Chats" },
-  { key: "discover", label: "Discover" },
-  { key: "status", label: "Status" },
+  { key: "discover", label: "People" },
 ];
 
 const androidTopInset = Platform.OS === "android" ? NativeStatusBar.currentHeight ?? 0 : 0;
@@ -58,15 +57,15 @@ function getChatStatusLabel(friend: FriendProfile) {
     return "Available";
   }
   if (friend.chatStatus === "incoming-pending") {
-    return "Needs your approval";
+    return "Request";
   }
   if (friend.chatStatus === "outgoing-pending") {
-    return "Waiting for acceptance";
+    return "Pending";
   }
   if (friend.chatStatus === "declined") {
     return "Declined";
   }
-  return "Invite to app";
+  return "Invite";
 }
 
 function getConversationPreview(
@@ -122,6 +121,22 @@ function getNearbyServiceLine(
   return "Nearby is active. Internet relay connects when reachable";
 }
 
+function getComposerPlaceholder(friend: FriendProfile) {
+  if (friend.chatStatus === "accepted") {
+    return `Message ${friend.displayName}`;
+  }
+
+  if (friend.chatStatus === "incoming-pending") {
+    return "Accept to chat";
+  }
+
+  if (friend.chatStatus === "outgoing-pending") {
+    return "Waiting for approval";
+  }
+
+  return "Send a request first";
+}
+
 export function ConcertMeshApp() {
   const {
     state,
@@ -162,17 +177,6 @@ export function ConcertMeshApp() {
     () => state.friends.filter((friend) => friend.chatStatus === "incoming-pending"),
     [state.friends],
   );
-  const pendingThreads = useMemo(
-    () =>
-      state.friends.filter(
-        (friend) =>
-          friend.chatStatus === "outgoing-pending" ||
-          friend.chatStatus === "incoming-pending" ||
-          friend.chatStatus === "invitable-unregistered",
-      ),
-    [state.friends],
-  );
-
   const conversationSummaries = useMemo(() => {
     if (!state.user) {
       return [];
@@ -351,11 +355,7 @@ export function ConcertMeshApp() {
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.hero}>
           <Text style={styles.kicker}>Concert mesh</Text>
-          <Text style={styles.headline}>Start with your phone number</Text>
-          <Text style={styles.copy}>
-            Chats stay request-based. People can find you by number, but they still
-            need your approval before messaging opens.
-          </Text>
+          <Text style={styles.headline}>Get started</Text>
           <View style={styles.phoneRow}>
             <TextInput
               value={countryCode}
@@ -419,22 +419,16 @@ export function ConcertMeshApp() {
                 </Pressable>
                 <View style={styles.friendMeta}>
                   <Text style={styles.rowTitle}>{selectedFriend.displayName}</Text>
-                  <Text style={styles.rowMeta}>
-                    {selectedFriend.phoneNumberDisplay} · {getChatStatusLabel(selectedFriend)}
-                  </Text>
+                  <Text style={styles.rowMeta}>{selectedFriend.phoneNumberDisplay}</Text>
                 </View>
+                <Text style={[styles.badge, styles.mutedBadge]}>
+                  {getChatStatusLabel(selectedFriend)}
+                </Text>
               </View>
 
               {selectedFriend.chatStatus !== "accepted" ? (
                 <View style={styles.requestBanner}>
                   <Text style={styles.rowTitle}>{getChatStatusLabel(selectedFriend)}</Text>
-                  <Text style={styles.rowMeta}>
-                    {selectedFriend.chatStatus === "incoming-pending"
-                      ? "Approve this request before either side can message."
-                      : selectedFriend.chatStatus === "outgoing-pending"
-                        ? "Your request was sent. Chat unlocks after they accept."
-                        : "This number is saved, but messaging works only after the other device is discoverable and accepts the request."}
-                  </Text>
                   {selectedFriend.chatStatus === "incoming-pending" ? (
                     <View style={styles.inlineActions}>
                       <Pressable
@@ -484,10 +478,7 @@ export function ConcertMeshApp() {
                 keyboardShouldPersistTaps="handled"
               >
                 {selectedChatMessages.length === 0 ? (
-                  <Text style={styles.rowMeta}>
-                    No messages yet. Once the request is accepted, this thread behaves
-                    like a regular direct chat.
-                  </Text>
+                  <Text style={styles.emptyStateLabel}>No messages yet</Text>
                 ) : (
                   selectedChatMessages.map((message) => {
                     const isMine = message.senderId === state.user?.id;
@@ -540,11 +531,7 @@ export function ConcertMeshApp() {
                   value={draft}
                   onChangeText={setDraft}
                   style={[styles.input, styles.composeInput]}
-                  placeholder={
-                    selectedFriend.chatStatus === "accepted"
-                      ? `Message ${selectedFriend.displayName}`
-                      : "Chat unlocks after acceptance"
-                  }
+                  placeholder={getComposerPlaceholder(selectedFriend)}
                   placeholderTextColor="#6F7E90"
                   editable={selectedFriend.chatStatus === "accepted"}
                 />
@@ -571,15 +558,13 @@ export function ConcertMeshApp() {
           <ScrollView contentContainerStyle={styles.scrollContent}>
             <View style={styles.banner}>
               <View>
-                <Text style={styles.kicker}>Live event</Text>
+                <Text style={styles.kicker}>Concert mesh</Text>
                 <Text style={styles.headline}>{state.event?.name}</Text>
-                <Text style={styles.copy}>
-                  {state.user.displayName} · {state.user.phoneNumberDisplay}
-                </Text>
+                <Text style={styles.copy}>{state.user.displayName}</Text>
               </View>
               <View style={styles.bannerStats}>
-                <Text style={styles.bannerStat}>{acceptedFriends.length} active</Text>
-                <Text style={styles.bannerStat}>{incomingRequests.length} requests</Text>
+                <Text style={styles.bannerStat}>{acceptedFriends.length}</Text>
+                <Text style={styles.bannerStatMuted}>{incomingRequests.length}</Text>
               </View>
             </View>
 
@@ -609,10 +594,7 @@ export function ConcertMeshApp() {
               <>
                 {!selectedFriend ? (
                 <>
-                  <SectionCard
-                    title="Chats"
-                    subtitle="Request-first conversations sorted like a chat inbox."
-                  >
+                  <SectionCard title="Chats">
                     <View style={styles.chatToolbar}>
                       <View style={styles.searchShell}>
                         <TextInput
@@ -632,28 +614,20 @@ export function ConcertMeshApp() {
                         ]}
                       >
                         <Text style={styles.secondaryLabel}>
-                          {showNewChat ? "Close" : "New chat"}
+                        {showNewChat ? "Close" : "New chat"}
                         </Text>
                       </Pressable>
                     </View>
 
                     {showNewChat ? (
                       <View style={styles.newChatPanel}>
-                        <View style={styles.row}>
-                          <View style={styles.friendMeta}>
-                            <Text style={styles.rowTitle}>Device contacts</Text>
-                            <Text style={styles.rowMeta}>
-                              {state.contactsPermissionState === "granted"
-                                ? `${state.contacts.length} contacts loaded`
-                                : state.contactsPermissionState === "denied"
-                                  ? "Contacts permission is blocked. Allow it to pull numbers from your address book."
-                                  : "Import contacts to start chats by phone number."}
-                            </Text>
-                          </View>
+                        <View style={styles.newChatHeader}>
+                          <Text style={styles.sectionEyebrow}>Contacts</Text>
                           <Pressable
                             onPress={syncContacts}
                             style={({ pressed }) => [
                               styles.secondaryButton,
+                              styles.compactButton,
                               pressed && styles.buttonPressed,
                             ]}
                           >
@@ -686,12 +660,7 @@ export function ConcertMeshApp() {
                               <Text style={styles.avatarLabel}>#</Text>
                             </View>
                             <View style={styles.friendMeta}>
-                              <Text style={styles.rowTitle}>
-                                {formatPhoneNumber(newChatMatches.manualPhoneNumber)}
-                              </Text>
-                              <Text style={styles.rowMeta}>
-                                Start a request by phone number
-                              </Text>
+                              <Text style={styles.rowTitle}>{formatPhoneNumber(newChatMatches.manualPhoneNumber)}</Text>
                             </View>
                             <Text style={[styles.badge, styles.mutedBadge]}>Request</Text>
                           </Pressable>
@@ -754,12 +723,7 @@ export function ConcertMeshApp() {
                             </View>
                             <View style={styles.friendMeta}>
                               <Text style={styles.rowTitle}>{contact.displayName}</Text>
-                              <Text style={styles.rowMeta}>
-                                {contact.phoneNumberDisplay} ·{" "}
-                                {matchedPeerIds.has(contact.phoneNumber)
-                                  ? "Nearby now"
-                                  : "Invite only until they appear nearby"}
-                              </Text>
+                              <Text style={styles.rowMeta}>{contact.phoneNumberDisplay}</Text>
                             </View>
                             <Text
                               style={[
@@ -794,9 +758,6 @@ export function ConcertMeshApp() {
                               <Text style={styles.rowTitle}>
                                 {peer.phoneNumberDisplay || peer.alias}
                               </Text>
-                              <Text style={styles.rowMeta}>
-                                Nearby over {peer.via}
-                              </Text>
                             </View>
                             <Text style={[styles.badge, styles.goodBadge]}>Request</Text>
                           </Pressable>
@@ -805,10 +766,7 @@ export function ConcertMeshApp() {
                     ) : null}
 
                     {conversationSummaries.length === 0 ? (
-                      <Text style={styles.rowMeta}>
-                        No chats yet. Sync contacts or type a phone number to send a
-                        request.
-                      </Text>
+                      <Text style={styles.emptyStateLabel}>No chats yet</Text>
                     ) : (
                       conversationSummaries.map(({ friend, latest, unreadCount }) => (
                         <Pressable
@@ -869,17 +827,11 @@ export function ConcertMeshApp() {
 
           {activeTab === "discover" ? (
             <>
-              <SectionCard
-                title="Nearby delivery"
-                subtitle="Nearby peers are transport endpoints. Requests and approval still control who can chat."
-              >
+              <SectionCard title="Nearby">
                 <View style={styles.row}>
                   <View style={styles.friendMeta}>
-                    <Text style={styles.rowTitle}>Nearby scan</Text>
-                    <Text style={styles.rowMeta}>
-                      {state.transportConnectionState}
-                      {state.transportError ? ` · ${state.transportError}` : ""}
-                    </Text>
+                    <Text style={styles.rowTitle}>Nearby</Text>
+                    <Text style={styles.rowMeta}>{nearbyServiceLine}</Text>
                   </View>
                   {state.nearbyPermissionState !== "granted" ? (
                     <Pressable
@@ -898,14 +850,9 @@ export function ConcertMeshApp() {
                 </View>
               </SectionCard>
 
-              <SectionCard
-                title="Incoming requests"
-                subtitle="These requests also appear in the chat inbox."
-              >
+              <SectionCard title="Requests">
                 {incomingRequests.length === 0 ? (
-                  <Text style={styles.rowMeta}>
-                    No pending approvals right now.
-                  </Text>
+                  <Text style={styles.emptyStateLabel}>No requests</Text>
                 ) : (
                   incomingRequests.map((friend) => (
                     <View key={friend.id} style={styles.friendCard}>
@@ -930,15 +877,9 @@ export function ConcertMeshApp() {
                 )}
               </SectionCard>
 
-              <SectionCard
-                title="Nearby phones"
-                subtitle="Use phone numbers from contacts or the chat composer. Nearby discovery is only the delivery path."
-              >
+              <SectionCard title="Nearby phones">
                 {state.transportPeers.length === 0 ? (
-                  <Text style={styles.rowMeta}>
-                    No nearby phones yet. Keep the app open on both devices and let
-                    discovery run in the foreground.
-                  </Text>
+                  <Text style={styles.emptyStateLabel}>No nearby phones</Text>
                 ) : (
                   state.transportPeers.map((peer) => {
                     const friend = state.friends.find((item) => item.id === peer.id);
@@ -980,21 +921,12 @@ export function ConcertMeshApp() {
                   })
                 )}
               </SectionCard>
-            </>
-          ) : null}
 
-          {activeTab === "status" ? (
-            <>
-              <SectionCard
-                title="Connection status"
-                subtitle="Operational details for transport, sync, and receipts."
-              >
+              <SectionCard title="Internet assist">
                 <View style={styles.row}>
                   <View style={styles.friendMeta}>
-                    <Text style={styles.rowTitle}>Transport</Text>
-                    <Text style={styles.rowMeta}>
-                      Hybrid delivery · {state.transportConnectionState}
-                    </Text>
+                    <Text style={styles.rowTitle}>Status</Text>
+                    <Text style={styles.rowMeta}>{state.transportConnectionState}</Text>
                   </View>
                   <Text
                     style={[
@@ -1004,28 +936,9 @@ export function ConcertMeshApp() {
                         : styles.mutedBadge,
                     ]}
                   >
-                    {state.transportPeers.length} peers
+                    {state.transportPeers.length} nearby
                   </Text>
                 </View>
-                <Text style={styles.rowMeta}>
-                  Contacts: {state.contactsPermissionState} · {state.contacts.length} loaded
-                </Text>
-                <Text style={styles.rowMeta}>
-                  Pending request threads: {pendingThreads.length}
-                </Text>
-                <Text style={styles.rowMeta}>
-                  Relay queue: {state.queue.length} · Seen envelopes:{" "}
-                  {state.seenEnvelopeIds.length}
-                </Text>
-                <Text style={styles.rowMeta}>
-                  Helped forward: {state.relayStats.forwardedEnvelopeCount} envelopes
-                </Text>
-              </SectionCard>
-
-              <SectionCard
-                title="Internet assist"
-                subtitle="Nearby stays on continuously. Configure the relay URL so queued messages can flush when internet returns."
-              >
                 <TextInput
                   value={relayUrlDraft}
                   onChangeText={setRelayUrlDraft}
@@ -1042,19 +955,15 @@ export function ConcertMeshApp() {
                     pressed && styles.buttonPressed,
                   ]}
                 >
-                  <Text style={styles.secondaryLabel}>Apply relay URL</Text>
-                </Pressable>
+                    <Text style={styles.secondaryLabel}>Apply relay URL</Text>
+                  </Pressable>
               </SectionCard>
 
-              <SectionCard
-                title="Device capability"
-                subtitle="Capability notes stay here so the chat flow stays clean."
-              >
+              <SectionCard title="Device">
                 {capabilities.map((capability) => (
                   <View key={capability.kind} style={styles.row}>
                     <View style={styles.friendMeta}>
                       <Text style={styles.rowTitle}>{capability.label}</Text>
-                      <Text style={styles.rowMeta}>{capability.note}</Text>
                     </View>
                     <Text
                       style={[
@@ -1062,7 +971,7 @@ export function ConcertMeshApp() {
                         capability.available ? styles.goodBadge : styles.mutedBadge,
                       ]}
                     >
-                      {capability.available ? "ready" : "limited"}
+                      {capability.available ? "Ready" : "Limited"}
                     </Text>
                   </View>
                 ))}
@@ -1174,11 +1083,25 @@ const styles = StyleSheet.create({
   },
   bannerStat: {
     color: "#8EE6C9",
-    fontSize: 12,
+    fontSize: 16,
     fontWeight: "800",
     backgroundColor: "#11332D",
+    minWidth: 40,
+    textAlign: "center",
     paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingVertical: 8,
+    borderRadius: 999,
+    overflow: "hidden",
+  },
+  bannerStatMuted: {
+    color: "#D3DFE8",
+    fontSize: 16,
+    fontWeight: "800",
+    backgroundColor: "#1A252D",
+    minWidth: 40,
+    textAlign: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 8,
     borderRadius: 999,
     overflow: "hidden",
   },
@@ -1260,6 +1183,10 @@ const styles = StyleSheet.create({
   toolbarButton: {
     minWidth: 96,
   },
+  compactButton: {
+    minHeight: 38,
+    paddingHorizontal: 14,
+  },
   buttonPressed: {
     opacity: 0.82,
   },
@@ -1286,6 +1213,19 @@ const styles = StyleSheet.create({
     marginTop: 8,
     paddingTop: 4,
   },
+  newChatHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
+  },
+  sectionEyebrow: {
+    color: "#7FA1B6",
+    fontSize: 12,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 1.1,
+  },
   row: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -1306,6 +1246,13 @@ const styles = StyleSheet.create({
     color: "#97A6B5",
     fontSize: 13,
     lineHeight: 18,
+  },
+  emptyStateLabel: {
+    color: "#97A6B5",
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: "center",
+    paddingVertical: 12,
   },
   unreadPreview: {
     color: "#DCE6EE",
@@ -1332,28 +1279,6 @@ const styles = StyleSheet.create({
   mutedBadge: {
     backgroundColor: "#1A252D",
     color: "#A1AFBC",
-  },
-  chipWrap: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-  },
-  chip: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 999,
-    backgroundColor: "#111B21",
-    borderWidth: 1,
-    borderColor: "#22303A",
-  },
-  chipActive: {
-    backgroundColor: "#123428",
-    borderColor: "#25D366",
-  },
-  chipLabel: {
-    color: "#E1EAF1",
-    fontSize: 13,
-    fontWeight: "700",
   },
   friendCard: {
     flexDirection: "row",
