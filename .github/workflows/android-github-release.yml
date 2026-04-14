@@ -49,7 +49,7 @@ jobs:
             echo "Missing required GitHub secret: GOOGLE_SERVICES_JSON" >&2
             exit 1
           fi
-          printf '%s' "$GOOGLE_SERVICES_JSON" > google-services.json
+          printf '%s' "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
 
       - name: Create Android debug keystore
         run: |
