@@ -6,10 +6,10 @@
   "scripts": {
     "start": "expo start",
     "android": "expo run:android",
-    "android:prebuild": "bunx expo prebuild --platform android",
-    "ios:prebuild": "bunx expo prebuild --platform ios",
+    "android:prebuild": "node scripts/ensure-native-firebase-config.mjs android && bunx expo prebuild --platform android",
+    "ios:prebuild": "node scripts/ensure-native-firebase-config.mjs ios && bunx expo prebuild --platform ios",
     "android:fast-build": "sh scripts/android-fast-build.sh",
-    "ios": "expo run:ios",
+    "ios": "node scripts/ensure-native-firebase-config.mjs ios && expo run:ios",
     "web": "expo start --web",
     "backend": "bun run scripts/relay-server.ts",
     "relay": "bun run scripts/relay-server.ts",

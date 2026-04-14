@@ -91,6 +91,8 @@ cd /Users/vivasvan.patel/Work/concert-togather
 bun run ios:prebuild
 ```
 
+If `GoogleService-Info.plist` is missing, native iOS prebuilds will fail immediately. That file is required because `@react-native-firebase/app` wires it into the Xcode project during prebuild.
+
 ### Run on your iPhone
 
 ```bash
@@ -157,8 +159,8 @@ Use these commands to keep logs readable while testing nearby transport:
 
 ```bash
 adb logcat -c
-adb shell am force-stop com.vivasvan.concerttogather
-adb shell am start -n com.vivasvan.concerttogather/.MainActivity
+adb shell am force-stop com.vivasvan.concertmesh
+adb shell am start -n com.vivasvan.concertmesh/.MainActivity
 adb logcat -v time AndroidRuntime:E ReactNativeJS:I ConcertNearbyMesh:V *:S
 ```
 

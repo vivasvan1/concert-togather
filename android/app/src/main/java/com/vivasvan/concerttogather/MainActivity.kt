@@ -1,4 +1,4 @@
-package com.vivasvan.concerttogather
+package com.vivasvan.concertmesh
 
 import android.os.Build
 import android.os.Bundle

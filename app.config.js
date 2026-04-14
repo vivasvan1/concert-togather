@@ -4,13 +4,13 @@ const config = {
   expo: {
     name: "Concert Togather",
     slug: "concert-togather",
-    scheme: "concerttogather",
+    scheme: "concertmesh",
     version: "0.1.0",
     orientation: "portrait",
     userInterfaceStyle: "light",
     assetBundlePatterns: ["**/*"],
     ios: {
-      bundleIdentifier: "com.vivasvan.concerttogather",
+      bundleIdentifier: "com.vivasvan.concertmesh",
       supportsTablet: true,
       infoPlist: {
         NSContactsUsageDescription:
@@ -31,7 +31,7 @@ const config = {
       "@react-native-firebase/auth",
     ],
     android: {
-      package: "com.vivasvan.concerttogather",
+      package: "com.vivasvan.concertmesh",
       versionCode: 1,
       adaptiveIcon: {
         backgroundColor: "#10141A",
@@ -64,6 +64,8 @@ if (fs.existsSync("./GoogleService-Info.plist")) {
 
 if (fs.existsSync("./google-services.json")) {
   config.expo.android.googleServicesFile = "./google-services.json";
+} else if (fs.existsSync("./android/app/google-services.json")) {
+  config.expo.android.googleServicesFile = "./android/app/google-services.json";
 }
 
 module.exports = config;

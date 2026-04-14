@@ -3,7 +3,7 @@ plugins {
   id 'expo-module-gradle-plugin'
 }
 
-group = 'com.vivasvan.concerttogather'
+group = 'com.vivasvan.concertmesh'
 version = '0.1.0'
 
 android {
@@ -17,4 +17,3 @@ android {
 dependencies {
   implementation "com.google.android.gms:play-services-nearby:19.3.0"
 }
-
