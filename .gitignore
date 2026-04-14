@@ -10,3 +10,5 @@ android/app/build
 android/app/debug.keystore
 modules/concert-nearby-mesh/android/build
 *.apk
+GoogleService-Info.plist
+google-services.json

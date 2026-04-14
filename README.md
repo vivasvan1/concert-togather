@@ -19,6 +19,17 @@ bun run typecheck
 bun run start
 ```
 
+## Native Firebase Files
+
+This repo now loads Firebase native app files only when they exist locally. For native builds, add:
+
+- `google-services.json` for Android
+- `GoogleService-Info.plist` for iOS
+
+Both files are ignored by Git in this repo and should be downloaded from the matching Firebase app settings before running native prebuilds or EAS builds.
+
+For GitHub Actions Android release builds, add a repository secret named `GOOGLE_SERVICES_JSON` whose value is the full contents of your Android `google-services.json` file. The workflow writes that secret to the repo root before running `./gradlew assembleRelease`.
+
 ## Build Android APK
 
 This project can already be packaged as an Android APK and installed on two phones.
@@ -65,6 +76,41 @@ This does:
 
 This is usually much faster than rerunning `eas build --local` every time.
 
+## Build for iPhone
+
+The current iPhone milestone is relay-first. The shared app shell, Firebase flows, contacts, meetup/status updates, and encrypted messaging work on iOS, but direct nearby phone-to-phone mesh is still Android-only.
+
+### One-time prerequisites
+
+1. Create an iOS app for the same Firebase project and download `GoogleService-Info.plist`.
+2. Place `GoogleService-Info.plist` in the repo root.
+3. Generate the native iOS project:
+
+```bash
+cd /Users/vivasvan.patel/Work/concert-togather
+bun run ios:prebuild
+```
+
+### Run on your iPhone
+
+```bash
+cd /Users/vivasvan.patel/Work/concert-togather
+bun run ios
+```
+
+Use the relay server path for live cross-device messaging:
+
+1. Start the local relay server with `bun run relay`.
+2. Put both phones and your laptop on the same Wi-Fi network.
+3. In the app on both phones, set transport to the relay server URL `ws://YOUR_LAN_IP:8787`.
+4. Join the same event and send messages, meetup updates, and status changes.
+
+If you want an installable cloud build instead of a direct Xcode/dev run:
+
+```bash
+eas build -p ios --profile preview
+```
+
 ## GitHub Release APK
 
 This repo now includes a GitHub Actions workflow that builds an Android APK and attaches it to a GitHub Release whenever you push a tag that starts with `v`.
@@ -86,6 +132,8 @@ After the tag is pushed, GitHub Actions will:
 - build `android/app/build/outputs/apk/release/app-release.apk`
 - create a GitHub Release for the tag
 - attach `concert-togather-v0.1.0.apk` to the release
+
+Before using this workflow, add the repository secret `GOOGLE_SERVICES_JSON` in GitHub Settings -> Secrets and variables -> Actions. Paste the complete JSON contents from your Firebase Android app config file.
 
 ### Important note
 
@@ -196,5 +244,5 @@ This fallback path is for real cross-device testing over Wi‑Fi with encrypted 
 
 1. Harden the Android nearby transport for reconnects, duplicate suppression, and background lifecycle.
 2. Expand from direct nearby messaging to tested multi-hop forwarding.
-3. Implement an iOS-capable nearby transport with explicit foreground/limited-background constraints.
+3. Implement an iOS-capable nearby transport with `MultipeerConnectivity` and explicit foreground constraints.
 4. Add a minimal coordination backend for accounts, event join, key bundles, and online bootstrap.

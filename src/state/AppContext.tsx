@@ -862,9 +862,11 @@ function createTransport(
   nearbyPermissionState: NearbyPermissionState,
   relayServerUrl: string,
 ): MeshTransport {
+  const isAndroid = Platform.OS === "android";
+
   if (mode === "hybrid") {
     const transports: Array<{ key: string; transport: MeshTransport }> = [];
-    if (Platform.OS === "android" && nearbyPermissionState === "granted") {
+    if (isAndroid && nearbyPermissionState === "granted") {
       transports.push({ key: "nearby", transport: new AndroidNearbyTransport() });
     }
     if (relayServerUrl.trim()) {
@@ -879,7 +881,7 @@ function createTransport(
   }
 
   if (mode === "nearby-android") {
-    return new AndroidNearbyTransport();
+    return isAndroid ? new AndroidNearbyTransport() : new WebSocketRelayTransport();
   }
 
   if (mode === "relay-server") {
@@ -1008,8 +1010,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     if (
       state.transportMode === "hybrid" &&
-      state.nearbyPermissionState !== "granted" &&
-      !state.relayServerUrl.trim()
+      !state.relayServerUrl.trim() &&
+      (Platform.OS !== "android" || state.nearbyPermissionState !== "granted")
     ) {
       dispatch({
         type: "set-peers",
@@ -1018,8 +1020,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       dispatch({
         type: "set-transport-connection",
         payload: {
-          state: "permission-required",
-          error: "Nearby permissions are required to discover phones directly.",
+          state: Platform.OS === "android" ? "permission-required" : "disconnected",
+          error:
+            Platform.OS === "android"
+              ? "Nearby permissions are required to discover phones directly."
+              : "Set a relay server URL to connect iPhones in this build.",
         },
       });
       return;
@@ -1598,8 +1603,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           dispatch({
             type: "set-transport-connection",
             payload: {
-              state: "permission-required",
-              error: "Nearby permissions are required before phones can be discovered directly.",
+              state: Platform.OS === "android" ? "permission-required" : "disconnected",
+              error:
+                Platform.OS === "android"
+                  ? "Nearby permissions are required before phones can be discovered directly."
+                  : "Direct nearby mesh is not available on iPhone yet. Use the relay server.",
             },
           });
         }

@@ -102,8 +102,10 @@ function getConversationSortBucket(friend: FriendProfile, unreadCount: number) {
 }
 
 function getNearbyServiceLine(
+  platformOs: string,
   transportConnectionState: string,
   nearbyPermissionState: string,
+  relayServerUrl: string,
   transportError?: string,
 ) {
   if (transportConnectionState === "error") {
@@ -113,11 +115,21 @@ function getNearbyServiceLine(
   }
 
   if (transportConnectionState === "connected") {
-    return "Nearby and internet assist are active";
+    return platformOs === "ios"
+      ? "Relay and internet assist are active"
+      : "Nearby and internet assist are active";
   }
 
   if (transportConnectionState === "connecting") {
-    return "Trying nearby and internet assist";
+    return platformOs === "ios"
+      ? "Trying relay and internet assist"
+      : "Trying nearby and internet assist";
+  }
+
+  if (platformOs === "ios") {
+    return relayServerUrl.trim()
+      ? "Relay is ready to connect when the event session starts"
+      : "Set a relay server URL for live iPhone-to-iPhone delivery";
   }
 
   if (nearbyPermissionState !== "granted") {
@@ -328,8 +340,10 @@ export function ConcertMeshApp() {
   }, [searchQuery, state.contacts, state.friends, state.transportPeers]);
 
   const nearbyServiceLine = getNearbyServiceLine(
+    Platform.OS,
     state.transportConnectionState,
     state.nearbyPermissionState,
+    state.relayServerUrl,
     state.transportError,
   );
 
@@ -908,8 +922,13 @@ export function ConcertMeshApp() {
                 <View style={styles.row}>
                   <View style={styles.friendMeta}>
                     <Text style={styles.rowTitle}>Nearby</Text>
+                    <Text style={styles.rowMeta}>
+                      {Platform.OS === "ios"
+                        ? "Direct iPhone mesh is pending. Use relay mode for now."
+                        : "Grant access to discover nearby Android phones directly."}
+                    </Text>
                   </View>
-                  {state.nearbyPermissionState !== "granted" ? (
+                  {Platform.OS === "android" && state.nearbyPermissionState !== "granted" ? (
                     <Pressable
                       onPress={requestNearbyAccess}
                       style={({ pressed }) => [
@@ -921,7 +940,14 @@ export function ConcertMeshApp() {
                       <Text style={styles.secondaryLabel}>Grant access</Text>
                     </Pressable>
                   ) : (
-                    <Text style={[styles.badge, styles.goodBadge]}>Always on</Text>
+                    <Text
+                      style={[
+                        styles.badge,
+                        Platform.OS === "ios" ? styles.mutedBadge : styles.goodBadge,
+                      ]}
+                    >
+                      {Platform.OS === "ios" ? "Relay-first" : "Always on"}
+                    </Text>
                   )}
                 </View>
               </SectionCard>
@@ -955,7 +981,9 @@ export function ConcertMeshApp() {
 
               <SectionCard title="Nearby phones">
                 {state.transportPeers.length === 0 ? (
-                  <Text style={styles.emptyStateLabel}>No nearby phones</Text>
+                  <Text style={styles.emptyStateLabel}>
+                    {Platform.OS === "ios" ? "No relay peers yet" : "No nearby phones"}
+                  </Text>
                 ) : (
                   state.transportPeers.map((peer) => {
                     const friend = state.friends.find((item) => item.id === peer.id);

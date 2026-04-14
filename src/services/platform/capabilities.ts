@@ -5,6 +5,7 @@ import { isConcertNearbyMeshAvailable } from "../mesh/ConcertNearbyMeshModule";
 
 export function getPlatformCapabilities(): MeshCapability[] {
   const isAndroid = Platform.OS === "android";
+  const isIos = Platform.OS === "ios";
 
   return [
     {
@@ -14,16 +15,16 @@ export function getPlatformCapabilities(): MeshCapability[] {
       canRelayInBackground: false,
       note: isAndroid
         ? "Android APK/dev build only. Uses native nearby discovery without a relay server."
-        : "Unavailable on iOS in the current implementation.",
+        : "Not in the iPhone build yet. Use relay or internet assist for now.",
     },
     {
       kind: "bluetooth",
       label: "Bluetooth relay",
-      available: true,
+      available: isAndroid,
       canRelayInBackground: isAndroid,
       note: isAndroid
         ? "Primary nearby transport for dense crowds."
-        : "Available, but practical background relay is limited on iOS.",
+        : "Planned for a later iPhone nearby transport pass.",
     },
     {
       kind: "wifi-direct",
@@ -39,7 +40,9 @@ export function getPlatformCapabilities(): MeshCapability[] {
       label: "Internet assist",
       available: true,
       canRelayInBackground: true,
-      note: "Optional bootstrap and catch-up path when service returns.",
+      note: isIos
+        ? "Primary iPhone transport today. Works with Firebase plus the relay server."
+        : "Optional bootstrap and catch-up path when service returns.",
     },
   ];
 }
