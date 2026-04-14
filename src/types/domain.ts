@@ -50,6 +50,7 @@ export interface UserIdentity {
 
 export interface FriendProfile {
   id: string;
+  requestId?: string;
   phoneNumber: string;
   phoneNumberDisplay: string;
   displayName: string;

@@ -4,6 +4,8 @@ node_modules
 dist
 web-build
 *.log
+backend.sqlite
+skills-lock.json
 android/app/build
 android/app/debug.keystore
 modules/concert-nearby-mesh/android/build

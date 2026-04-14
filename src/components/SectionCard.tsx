@@ -16,11 +16,11 @@ export function SectionCard({ title, subtitle, children }: { title: string; subt
 const styles = StyleSheet.create({
   card: {
     backgroundColor: "#171B22",
-    borderRadius: 24,
-    padding: 18,
-    gap: 12,
+    borderRadius: 16,
+    padding: 14,
+    gap: 10,
     borderWidth: 1,
-    borderColor: "#2A3340",
+    borderColor: "#22303A",
   },
   header: {
     gap: 4,

@@ -3,7 +3,6 @@ import { decodeBase64, decodeUTF8, encodeBase64, encodeUTF8 } from "tweetnacl-ut
 
 import type { RelayEnvelope, UserIdentity } from "../../types/domain";
 
-import { createId } from "../../utils/ids";
 import { formatPhoneNumber, normalizePhoneNumber } from "../../utils/phone";
 
 export function createUserIdentity(phoneNumber: string, displayName?: string): UserIdentity {
@@ -15,7 +14,7 @@ export function createUserIdentity(phoneNumber: string, displayName?: string): U
   const phoneNumberDisplay = formatPhoneNumber(normalizedPhoneNumber);
 
   return {
-    id: createId("user"),
+    id: normalizedPhoneNumber,
     phoneNumber: normalizedPhoneNumber,
     phoneNumberDisplay,
     displayName: displayName?.trim() || phoneNumberDisplay,

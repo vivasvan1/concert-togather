@@ -9,7 +9,7 @@ export function createSeedState(): AppState {
     user: undefined,
     event: {
       id: "event-headliner-2026",
-      name: "Headliner Night",
+      name: "Concert Mesh",
       venueName: "Apollo Grounds",
       startedAt: now,
       meetupSpots: ["North Gate", "Sound Booth", "Merch Bar", "Food Court", "Exit C"],
@@ -26,7 +26,7 @@ export function createSeedState(): AppState {
     contacts: [],
     contactsPermissionState: "unknown",
     transportMode: "hybrid",
-    relayServerUrl: "ws://192.168.1.10:8787",
+    relayServerUrl: "ws://192.168.1.10:8787/ws",
     transportConnectionState: "permission-required",
     nearbyPermissionState: "unknown",
     seenEnvelopeIds: [],

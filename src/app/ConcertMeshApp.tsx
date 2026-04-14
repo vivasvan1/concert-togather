@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
+  BackHandler,
   Platform,
   Pressable,
   SafeAreaView,
@@ -12,6 +13,11 @@ import {
 } from "react-native";
 
 import { SectionCard } from "../components/SectionCard";
+import {
+  confirmPhoneOtp,
+  requestPhoneOtp,
+  type PhoneConfirmationResult,
+} from "../services/firebase/FirebasePhoneAuthService";
 import { getPlatformCapabilities } from "../services/platform/capabilities";
 import { useAppState } from "../state/AppContext";
 import type { ChatMessage, DeliveryState, DeviceContact, FriendProfile } from "../types/domain";
@@ -154,6 +160,10 @@ export function ConcertMeshApp() {
   const [countryCode, setCountryCode] = useState("+91");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [profileName, setProfileName] = useState("");
+  const [otpCode, setOtpCode] = useState("");
+  const [phoneConfirmation, setPhoneConfirmation] = useState<PhoneConfirmationResult | null>(null);
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authError, setAuthError] = useState("");
   const [draft, setDraft] = useState("");
   const [relayUrlDraft, setRelayUrlDraft] = useState(state.relayServerUrl);
   const [showNewChat, setShowNewChat] = useState(false);
@@ -169,10 +179,6 @@ export function ConcertMeshApp() {
     setRelayUrlDraft(state.relayServerUrl);
   }, [state.relayServerUrl]);
 
-  const acceptedFriends = useMemo(
-    () => state.friends.filter((friend) => friend.chatStatus === "accepted"),
-    [state.friends],
-  );
   const incomingRequests = useMemo(
     () => state.friends.filter((friend) => friend.chatStatus === "incoming-pending"),
     [state.friends],
@@ -224,6 +230,22 @@ export function ConcertMeshApp() {
   const selectedFriend =
     state.friends.find((friend) => friend.id === state.selectedChatFriendId) ??
     conversationSummaries.find((item) => item.friend.id === state.selectedChatFriendId)?.friend;
+
+  useEffect(() => {
+    if (Platform.OS !== "android" || !selectedFriend) {
+      return;
+    }
+
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      setOpenedUnreadMarker(undefined);
+      setSelectedChatFriend(undefined);
+      return true;
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [selectedFriend, setSelectedChatFriend]);
 
   const selectedChatMessages = useMemo(() => {
     if (!state.user || !selectedFriend) {
@@ -381,17 +403,81 @@ export function ConcertMeshApp() {
             placeholder="Your name"
             placeholderTextColor="#6F7E90"
           />
+          {phoneConfirmation ? (
+            <TextInput
+              value={otpCode}
+              onChangeText={setOtpCode}
+              style={styles.input}
+              placeholder="OTP code"
+              placeholderTextColor="#6F7E90"
+              keyboardType="number-pad"
+            />
+          ) : null}
+          {authError ? <Text style={styles.authError}>{authError}</Text> : null}
           <Pressable
-            onPress={() => bootstrapIdentity(normalizedPhone, profileName)}
+            onPress={async () => {
+              if (!isLikelyPhoneNumber(normalizedPhone) || authBusy) {
+                return;
+              }
+
+              setAuthBusy(true);
+              setAuthError("");
+
+              try {
+                if (!phoneConfirmation) {
+                  const confirmation = await requestPhoneOtp(normalizedPhone);
+                  setPhoneConfirmation(confirmation);
+                  setOtpCode("");
+                } else {
+                  await confirmPhoneOtp(phoneConfirmation, otpCode.trim());
+                  bootstrapIdentity(normalizedPhone, profileName);
+                }
+              } catch (error) {
+                setAuthError(
+                  error instanceof Error
+                    ? error.message
+                    : "Unable to verify phone number.",
+                );
+              } finally {
+                setAuthBusy(false);
+              }
+            }}
             style={({ pressed }) => [
               styles.primaryButton,
-              !isLikelyPhoneNumber(normalizedPhone) && styles.disabledButton,
+              ((!isLikelyPhoneNumber(normalizedPhone) ||
+                (phoneConfirmation ? otpCode.trim().length < 4 : false) ||
+                authBusy) &&
+                styles.disabledButton),
               pressed && styles.buttonPressed,
             ]}
-            disabled={!isLikelyPhoneNumber(normalizedPhone)}
+            disabled={
+              !isLikelyPhoneNumber(normalizedPhone) ||
+              (phoneConfirmation ? otpCode.trim().length < 4 : false) ||
+              authBusy
+            }
           >
-            <Text style={styles.primaryButtonLabel}>Enter Headliner Night</Text>
+            <Text style={styles.primaryButtonLabel}>
+              {phoneConfirmation ? "Verify and enter" : "Send code"}
+            </Text>
           </Pressable>
+          {phoneConfirmation ? (
+            <Pressable
+              onPress={() => {
+                if (authBusy) {
+                  return;
+                }
+                setPhoneConfirmation(null);
+                setOtpCode("");
+                setAuthError("");
+              }}
+              style={({ pressed }) => [
+                styles.secondaryButton,
+                pressed && styles.buttonPressed,
+              ]}
+            >
+              <Text style={styles.secondaryLabel}>Change number</Text>
+            </Pressable>
+          ) : null}
         </View>
       </SafeAreaView>
     );
@@ -410,12 +496,11 @@ export function ConcertMeshApp() {
                     setSelectedChatFriend(undefined);
                   }}
                   style={({ pressed }) => [
-                    styles.secondaryButton,
                     styles.backButton,
                     pressed && styles.buttonPressed,
                   ]}
                 >
-                  <Text style={styles.secondaryLabel}>Back</Text>
+                  <Text style={styles.backButtonLabel}>‹</Text>
                 </Pressable>
                 <View style={styles.friendMeta}>
                   <Text style={styles.rowTitle}>{selectedFriend.displayName}</Text>
@@ -557,18 +642,10 @@ export function ConcertMeshApp() {
         ) : (
           <ScrollView contentContainerStyle={styles.scrollContent}>
             <View style={styles.banner}>
-              <View>
-                <Text style={styles.kicker}>Concert mesh</Text>
-                <Text style={styles.headline}>{state.event?.name}</Text>
-                <Text style={styles.copy}>{state.user.displayName}</Text>
-              </View>
-              <View style={styles.bannerStats}>
-                <Text style={styles.bannerStat}>{acceptedFriends.length}</Text>
-                <Text style={styles.bannerStatMuted}>{incomingRequests.length}</Text>
-              </View>
+              <Text style={styles.topBrand}>Concert Mesh</Text>
             </View>
 
-            {nearbyServiceLine ? (
+            {activeTab === "chats" && nearbyServiceLine ? (
               <View
                 style={[
                   styles.serviceLine,
@@ -831,7 +908,6 @@ export function ConcertMeshApp() {
                 <View style={styles.row}>
                   <View style={styles.friendMeta}>
                     <Text style={styles.rowTitle}>Nearby</Text>
-                    <Text style={styles.rowMeta}>{nearbyServiceLine}</Text>
                   </View>
                   {state.nearbyPermissionState !== "granted" ? (
                     <Pressable
@@ -923,27 +999,11 @@ export function ConcertMeshApp() {
               </SectionCard>
 
               <SectionCard title="Internet assist">
-                <View style={styles.row}>
-                  <View style={styles.friendMeta}>
-                    <Text style={styles.rowTitle}>Status</Text>
-                    <Text style={styles.rowMeta}>{state.transportConnectionState}</Text>
-                  </View>
-                  <Text
-                    style={[
-                      styles.badge,
-                      state.transportConnectionState === "connected"
-                        ? styles.goodBadge
-                        : styles.mutedBadge,
-                    ]}
-                  >
-                    {state.transportPeers.length} nearby
-                  </Text>
-                </View>
                 <TextInput
                   value={relayUrlDraft}
                   onChangeText={setRelayUrlDraft}
                   style={styles.input}
-                  placeholder="ws://192.168.x.x:8787"
+                  placeholder="ws://192.168.x.x:8787/ws"
                   placeholderTextColor="#6F7E90"
                   autoCapitalize="none"
                   autoCorrect={false}
@@ -1019,33 +1079,33 @@ const styles = StyleSheet.create({
     backgroundColor: "#0B141A",
   },
   scrollContent: {
-    padding: 16,
-    gap: 16,
-    paddingBottom: 124,
+    padding: 14,
+    gap: 12,
+    paddingBottom: 108,
   },
   hero: {
     flex: 1,
     padding: 24,
     justifyContent: "center",
-    gap: 14,
+    gap: 12,
     backgroundColor: "#0B141A",
   },
   banner: {
     paddingHorizontal: 4,
     paddingTop: 6,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    gap: 16,
-    alignItems: "flex-start",
+    gap: 4,
   },
-  bannerStats: {
-    alignItems: "flex-end",
-    gap: 6,
+  topBrand: {
+    color: "#25D366",
+    fontSize: 28,
+    lineHeight: 32,
+    fontWeight: "800",
+    letterSpacing: 0.2,
   },
   serviceLine: {
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
     borderWidth: 1,
   },
   serviceLineNeutral: {
@@ -1069,41 +1129,17 @@ const styles = StyleSheet.create({
   },
   chatScreen: {
     flex: 1,
-    padding: 16,
-    paddingBottom: 124,
+    padding: 14,
+    paddingBottom: 108,
   },
   chatCard: {
     flex: 1,
     backgroundColor: "#171B22",
-    borderRadius: 24,
-    padding: 18,
-    gap: 12,
+    borderRadius: 16,
+    padding: 14,
+    gap: 10,
     borderWidth: 1,
-    borderColor: "#2A3340",
-  },
-  bannerStat: {
-    color: "#8EE6C9",
-    fontSize: 16,
-    fontWeight: "800",
-    backgroundColor: "#11332D",
-    minWidth: 40,
-    textAlign: "center",
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 999,
-    overflow: "hidden",
-  },
-  bannerStatMuted: {
-    color: "#D3DFE8",
-    fontSize: 16,
-    fontWeight: "800",
-    backgroundColor: "#1A252D",
-    minWidth: 40,
-    textAlign: "center",
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 999,
-    overflow: "hidden",
+    borderColor: "#22303A",
   },
   kicker: {
     color: "#25D366",
@@ -1114,8 +1150,8 @@ const styles = StyleSheet.create({
   },
   headline: {
     color: "#F3F7FB",
-    fontSize: 30,
-    lineHeight: 34,
+    fontSize: 28,
+    lineHeight: 32,
     fontWeight: "800",
   },
   copy: {
@@ -1123,9 +1159,14 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 22,
   },
+  authError: {
+    color: "#FFB8C0",
+    fontSize: 13,
+    lineHeight: 18,
+  },
   input: {
-    minHeight: 54,
-    borderRadius: 18,
+    minHeight: 50,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: "#22303A",
     backgroundColor: "#111B21",
@@ -1144,9 +1185,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   primaryButton: {
-    minHeight: 52,
+    minHeight: 48,
     paddingHorizontal: 18,
-    borderRadius: 18,
+    borderRadius: 12,
     backgroundColor: "#25D366",
     justifyContent: "center",
     alignItems: "center",
@@ -1157,14 +1198,14 @@ const styles = StyleSheet.create({
     fontWeight: "800",
   },
   secondaryButton: {
-    minHeight: 44,
-    paddingHorizontal: 16,
-    borderRadius: 14,
+    minHeight: 40,
+    paddingHorizontal: 14,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#2A3A44",
+    borderColor: "#22303A",
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#101A20",
+    backgroundColor: "#121C22",
   },
   secondaryLabel: {
     color: "#D7E3EC",
@@ -1197,7 +1238,7 @@ const styles = StyleSheet.create({
   },
   searchShell: {
     flex: 1,
-    borderRadius: 16,
+    borderRadius: 12,
     backgroundColor: "#111B21",
     borderWidth: 1,
     borderColor: "#22303A",
@@ -1210,8 +1251,8 @@ const styles = StyleSheet.create({
   },
   newChatPanel: {
     gap: 10,
-    marginTop: 8,
-    paddingTop: 4,
+    marginTop: 6,
+    paddingTop: 2,
   },
   newChatHeader: {
     flexDirection: "row",
@@ -1285,21 +1326,21 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     gap: 12,
-    borderRadius: 18,
+    borderRadius: 12,
     backgroundColor: "#111B21",
     borderWidth: 1,
-    borderColor: "#20303A",
-    padding: 14,
+    borderColor: "#1F2B33",
+    padding: 12,
   },
   contactRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
-    borderRadius: 18,
+    borderRadius: 12,
     backgroundColor: "#111B21",
     borderWidth: 1,
-    borderColor: "#20303A",
-    padding: 14,
+    borderColor: "#1F2B33",
+    padding: 12,
   },
   inboxRow: {
     flexDirection: "row",
@@ -1320,9 +1361,9 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 42,
+    height: 42,
+    borderRadius: 12,
     backgroundColor: "#1F2C34",
     alignItems: "center",
     justifyContent: "center",
@@ -1338,15 +1379,26 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   backButton: {
-    minWidth: 82,
+    width: 34,
+    height: 34,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "transparent",
+  },
+  backButtonLabel: {
+    color: "#D7E3EC",
+    fontSize: 28,
+    lineHeight: 28,
+    fontWeight: "400",
   },
   requestBanner: {
     gap: 8,
-    borderRadius: 18,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#2A3A44",
+    borderColor: "#22303A",
     backgroundColor: "#101A20",
-    padding: 14,
+    padding: 12,
   },
   chatThread: {
     flex: 1,
@@ -1372,17 +1424,17 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     backgroundColor: "#103D30",
     borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     overflow: "hidden",
   },
   messageBubble: {
     maxWidth: "84%",
     gap: 8,
-    borderRadius: 18,
+    borderRadius: 14,
     backgroundColor: "#182229",
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
   },
   messageBubbleMine: {
     backgroundColor: "#134D37",
@@ -1415,32 +1467,32 @@ const styles = StyleSheet.create({
   composeRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    paddingTop: 4,
+    gap: 8,
+    paddingTop: 2,
   },
   composeInput: {
     flex: 1,
   },
   composeButton: {
-    minWidth: 92,
+    minWidth: 84,
   },
   tabBar: {
     position: "absolute",
-    left: 16,
-    right: 16,
-    bottom: 18,
+    left: 14,
+    right: 14,
+    bottom: 14,
     flexDirection: "row",
-    gap: 10,
-    padding: 10,
-    borderRadius: 26,
+    gap: 8,
+    padding: 8,
+    borderRadius: 16,
     backgroundColor: "#101A20",
     borderWidth: 1,
     borderColor: "#22303A",
   },
   tabButton: {
     flex: 1,
-    minHeight: 54,
-    borderRadius: 16,
+    minHeight: 48,
+    borderRadius: 10,
     justifyContent: "center",
     alignItems: "center",
   },

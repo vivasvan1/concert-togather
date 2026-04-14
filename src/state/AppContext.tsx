@@ -11,6 +11,14 @@ import { PermissionsAndroid, Platform } from "react-native";
 
 import { loadDeviceContacts, requestContactsPermission } from "../services/contacts/ContactsService";
 import {
+  createFirebaseFriendRequest,
+  loadFirebaseUsersByIds,
+  loadPendingFirebaseFriendRequests,
+  lookupFirebaseUserByPhone,
+  respondToFirebaseFriendRequest,
+  upsertFirebaseUserProfile,
+} from "../services/firebase/FirebaseBootstrapService";
+import {
   createUserIdentity,
   decryptFromSender,
   decryptWithEventSharedKey,
@@ -75,6 +83,7 @@ type AppAction =
     }
   | { type: "increment-relay-forwarded" }
   | { type: "add-outgoing-request"; payload: FriendProfile }
+  | { type: "sync-firebase-friends"; payload: FriendProfile[] }
   | {
       type: "create-invite-placeholder";
       payload: { phoneNumber: string; displayName: string };
@@ -247,6 +256,7 @@ function upsertFriend(friends: FriendProfile[], nextFriend: FriendProfile): Frie
           publicKey: nextFriend.publicKey || friend.publicKey,
           encryptionPublicKey:
             nextFriend.encryptionPublicKey || friend.encryptionPublicKey,
+          requestId: nextFriend.requestId ?? friend.requestId,
           requestedAt: nextFriend.requestedAt ?? friend.requestedAt,
           approvedAt: nextFriend.approvedAt ?? friend.approvedAt,
         }
@@ -271,6 +281,7 @@ function migrateUser(rawUser: any): UserIdentity | undefined {
   const phoneNumber = normalizePhoneNumber(rawUser.phoneNumber ?? rawUser.handle ?? "");
   return {
     ...rawUser,
+    id: phoneNumber || rawUser.id,
     phoneNumber,
     phoneNumberDisplay:
       rawUser.phoneNumberDisplay || formatPhoneNumber(phoneNumber) || rawUser.displayName || "You",
@@ -298,7 +309,7 @@ function mapLegacyStatus(status: string | undefined): FriendProfile["chatStatus"
 function migrateFriend(rawFriend: any): FriendProfile {
   const phoneNumber = normalizePhoneNumber(rawFriend.phoneNumber ?? rawFriend.handle ?? "");
   return {
-    id: rawFriend.id,
+    id: phoneNumber || rawFriend.id,
     phoneNumber,
     phoneNumberDisplay:
       rawFriend.phoneNumberDisplay || formatPhoneNumber(phoneNumber) || rawFriend.displayName || "",
@@ -308,6 +319,7 @@ function migrateFriend(rawFriend: any): FriendProfile {
     encryptionPublicKey: rawFriend.encryptionPublicKey ?? "",
     chatStatus: rawFriend.chatStatus ?? mapLegacyStatus(rawFriend.friendshipStatus),
     lastSeenAt: rawFriend.lastSeenAt ?? new Date().toISOString(),
+    requestId: rawFriend.requestId,
     requestedAt: rawFriend.requestedAt,
     approvedAt: rawFriend.approvedAt,
   };
@@ -589,6 +601,11 @@ function reducer(state: AppState, action: AppAction): AppState {
       };
     case "add-outgoing-request":
       return applyFriendUpsert(state, action.payload);
+    case "sync-firebase-friends":
+      return action.payload.reduce(
+        (nextState, friend) => applyFriendUpsert(nextState, friend),
+        state,
+      );
     case "create-invite-placeholder": {
       const existing = state.friends.find(
         (friend) => friend.phoneNumber === action.payload.phoneNumber,
@@ -901,6 +918,59 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
+
+  useEffect(() => {
+    if (!state.user) {
+      return;
+    }
+
+    upsertFirebaseUserProfile(state.user).catch(() => undefined);
+  }, [state.user]);
+
+  useEffect(() => {
+    if (!state.user) {
+      return;
+    }
+
+    Promise.all([
+      loadPendingFirebaseFriendRequests(state.user.id),
+    ])
+      .then(async ([pendingRequests]) => {
+        const senderIds = pendingRequests
+          .map((request) => String(request.fromUid ?? ""))
+          .filter(Boolean);
+        const senders = await loadFirebaseUsersByIds(senderIds);
+        const friends = pendingRequests
+          .map((request) => {
+            const sender = senders.find((item) => item.uid === request.fromUid);
+            if (!sender) {
+              return undefined;
+            }
+
+            return {
+              id: sender.uid,
+              requestId: request.id,
+              phoneNumber: sender.phoneNumber,
+              phoneNumberDisplay: sender.phoneNumberDisplay,
+              displayName: sender.displayName,
+              publicKey: sender.publicKey ?? "",
+              encryptionPublicKey: sender.encryptionPublicKey ?? "",
+              chatStatus: "incoming-pending" as const,
+              lastSeenAt: request.updatedAt ?? request.createdAt ?? new Date().toISOString(),
+              requestedAt: request.createdAt,
+            };
+          })
+          .filter(Boolean) as FriendProfile[];
+
+        if (friends.length > 0) {
+          dispatch({
+            type: "sync-firebase-friends",
+            payload: friends,
+          });
+        }
+      })
+      .catch(() => undefined);
+  }, [state.user]);
 
   useEffect(() => {
     if (!state.user || Platform.OS !== "android") {
@@ -1277,6 +1347,37 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         );
 
         if (!peer) {
+          try {
+            const registeredUser = await lookupFirebaseUserByPhone(normalizedPhoneNumber);
+
+            if (registeredUser) {
+              const sentAt = new Date().toISOString();
+              const requestId = await createFirebaseFriendRequest(registeredUser.uid);
+
+              dispatch({
+                type: "add-outgoing-request",
+                payload: {
+                  id: registeredUser.uid,
+                  requestId,
+                  phoneNumber: registeredUser.phoneNumber,
+                  phoneNumberDisplay: registeredUser.phoneNumberDisplay,
+                  displayName:
+                    displayName?.trim() ||
+                    registeredUser.displayName ||
+                    registeredUser.phoneNumberDisplay,
+                  publicKey: registeredUser.publicKey ?? "",
+                  encryptionPublicKey: registeredUser.encryptionPublicKey ?? "",
+                  chatStatus: "outgoing-pending",
+                  lastSeenAt: sentAt,
+                  requestedAt: sentAt,
+                },
+              });
+              return;
+            }
+          } catch {
+            // Fall back to nearby/local invite behavior when Firebase is unavailable.
+          }
+
           dispatch({
             type: "create-invite-placeholder",
             payload: {
@@ -1338,6 +1439,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
+        if (friend.requestId) {
+          await respondToFirebaseFriendRequest(friend.requestId, "accept").catch(() => undefined);
+        }
+
         const approvedAt = new Date().toISOString();
         const payload = buildPayload(state.user, {
           kind: "friend-approval",
@@ -1363,6 +1468,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         await transportRef.current.send(envelope);
       },
       declineFriendRequest(friendId) {
+        const friend = state.friends.find((item) => item.id === friendId);
+        if (friend?.requestId) {
+          respondToFirebaseFriendRequest(friend.requestId, "decline").catch(() => undefined);
+        }
         dispatch({
           type: "decline-friend-local",
           payload: { friendId },

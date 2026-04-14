@@ -10,6 +10,7 @@
       "**/*"
     ],
     "ios": {
+      "googleServicesFile": "./GoogleService-Info.plist",
       "supportsTablet": true,
       "infoPlist": {
         "NSContactsUsageDescription": "Concert Togather uses your contacts so you can start chats by phone number and send request-based invites.",
@@ -22,9 +23,12 @@
         {
           "contactsPermission": "Concert Togather uses your contacts so you can start chats by phone number and send request-based invites."
         }
-      ]
+      ],
+      "@react-native-firebase/app",
+      "@react-native-firebase/auth"
     ],
     "android": {
+      "googleServicesFile": "./google-services.json",
       "package": "com.vivasvan.concerttogather",
       "versionCode": 1,
       "adaptiveIcon": {
