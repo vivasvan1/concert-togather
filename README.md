@@ -269,3 +269,8 @@ DEVICE1="192.168.31.219:43183" PAIR_ADDR="192.168.31.219:XXXXX" PAIR_CODE="YYYYY
 ```sh
 DEVICE1="192.168.31.219:43183" APK_PATH="$PWD/concert-togather-release.apk" && bun run android:fast-build && adb connect "$DEVICE1" && (adb -s "$DEVICE1" uninstall com.vivasvan.concertmesh || true) && adb -s "$DEVICE1" install -r "$APK_PATH" && adb -s "$DEVICE1" logcat -c && adb -s "$DEVICE1" shell am force-stop com.vivasvan.concertmesh && adb -s "$DEVICE1" shell am start -n com.vivasvan.concertmesh/.MainActivity && tmux new-window -n concert-logs "adb -s '$DEVICE1' logcat -v time ConcertNearbyMesh:V NearbyConnections:V AndroidRuntime:E '*:S'"
 ```
+
+### Single Emulator
+```sh
+if ! adb devices | grep -q emulator; then AVD=$(emulator -list-avds | head -n 1); echo "Starting $AVD..."; emulator -avd "$AVD" >/dev/null 2>&1 & fi && echo "Waiting for emulator..." && while ! adb devices | grep -q emulator; do sleep 1; done && DEVICE1=$(adb devices | awk '/emulator/ {print $1}' | head -n 1) && adb -s "$DEVICE1" wait-for-device && while [ "$(adb -s "$DEVICE1" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" != "1" ]; do sleep 1; done && APK_PATH="$PWD/concert-togather-release.apk" && bun run android:fast-build && (adb -s "$DEVICE1" uninstall com.vivasvan.concertmesh || true) && adb -s "$DEVICE1" install -r "$APK_PATH" && adb -s "$DEVICE1" logcat -c && adb -s "$DEVICE1" shell am force-stop com.vivasvan.concertmesh && adb -s "$DEVICE1" shell am start -n com.vivasvan.concertmesh/.MainActivity && tmux new-window -n concert-logs "adb -s '$DEVICE1' logcat -v time ConcertNearbyMesh:V NearbyConnections:V AndroidRuntime:E '*:S'"
+```

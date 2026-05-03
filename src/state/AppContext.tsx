@@ -13,8 +13,10 @@ import { loadDeviceContacts, requestContactsPermission } from "../services/conta
 import {
   loadFirebaseUsersByIds,
   lookupFirebaseUserByPhone,
-  upsertFirebaseUserProfile,
+  sendMessageToFirebase,
   syncContactsToBackend,
+  upsertFirebaseUserProfile,
+  type FirebaseUserProfile,
 } from "../services/firebase/FirebaseBootstrapService";
 import {
   createUserIdentity,
@@ -223,16 +225,19 @@ function matchContacts(contacts: DeviceContact[], friends: FriendProfile[]) {
 }
 
 function upsertFriend(friends: FriendProfile[], nextFriend: FriendProfile): FriendProfile[] {
-  const existing = friends.find((friend) => friend.id === nextFriend.id);
+  const existing = friends.find(
+    (friend) => friend.id === nextFriend.id || (friend.phoneNumber && friend.phoneNumber === nextFriend.phoneNumber)
+  );
   if (!existing) {
     return [nextFriend, ...friends];
   }
 
   return friends.map((friend) =>
-    friend.id === nextFriend.id
+    (friend.id === nextFriend.id || (friend.phoneNumber && friend.phoneNumber === nextFriend.phoneNumber))
       ? {
           ...friend,
           ...nextFriend,
+          id: nextFriend.id,
           displayName: nextFriend.displayName || friend.displayName,
           phoneNumber: nextFriend.phoneNumber || friend.phoneNumber,
           phoneNumberDisplay: nextFriend.phoneNumberDisplay || friend.phoneNumberDisplay,
@@ -245,11 +250,18 @@ function upsertFriend(friends: FriendProfile[], nextFriend: FriendProfile): Frie
 }
 
 function applyFriendUpsert(state: AppState, nextFriend: FriendProfile) {
+  const existing = state.friends.find(
+    (friend) => friend.id === nextFriend.id || (friend.phoneNumber && friend.phoneNumber === nextFriend.phoneNumber)
+  );
+  const oldId = existing?.id;
+
   const friends = upsertFriend(state.friends, nextFriend);
   return {
     ...state,
     friends,
     contacts: matchContacts(state.contacts, friends),
+    selectedChatFriendId:
+      state.selectedChatFriendId === oldId ? nextFriend.id : state.selectedChatFriendId,
   };
 }
 
@@ -811,7 +823,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    upsertFirebaseUserProfile(state.user).catch(() => undefined);
+    upsertFirebaseUserProfile(state.user).catch((err) => console.error("Failed to upsert profile:", err));
   }, [state.user]);
 
   useEffect(() => {
@@ -1220,7 +1232,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           payload: contacts,
         });
 
-        const phoneNumbers = contacts.map(c => c.phoneNumber).filter(Boolean);
+        const phoneNumbersToSync = new Set<string>();
+        contacts.forEach(c => {
+          if (c.phoneNumber) phoneNumbersToSync.add(c.phoneNumber);
+        });
+        stateRef.current.friends.forEach(f => {
+          if (f.chatStatus !== "accepted" && f.phoneNumber) {
+            phoneNumbersToSync.add(f.phoneNumber);
+          }
+        });
+
+        const phoneNumbers = Array.from(phoneNumbersToSync);
         if (phoneNumbers.length > 0) {
           const registeredUsers = await syncContactsToBackend(phoneNumbers);
           const friends = registeredUsers.map(user => ({
@@ -1311,7 +1333,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         });
 
         try {
-          await transportRef.current.send(envelope);
+          const sentFirebase = sendMessageToFirebase(envelope, friend.id)
+            .then(() => true)
+            .catch(() => false);
+
+          let sentTransport = false;
+          try {
+            await transportRef.current.send(envelope);
+            sentTransport = true;
+          } catch {
+            // Mesh transport failed
+          }
+
+          const firebaseSuccess = await sentFirebase;
+          if (!sentTransport && !firebaseSuccess) {
+            return;
+          }
+
           dispatch({
             type: "ack-outbound-send",
             payload: { envelopeId: envelope.id },

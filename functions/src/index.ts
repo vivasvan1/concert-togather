@@ -1,11 +1,11 @@
-import {initializeApp} from "firebase-admin/app";
-import {getFirestore} from "firebase-admin/firestore";
-import {HttpsError, onCall} from "firebase-functions/v2/https";
-import {setGlobalOptions} from "firebase-functions/v2/options";
+import { initializeApp } from "firebase-admin/app";
+import { getFirestore } from "firebase-admin/firestore";
+import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { setGlobalOptions } from "firebase-functions/v2/options";
 
 initializeApp();
 
-setGlobalOptions({maxInstances: 10, region: "asia-south1"});
+setGlobalOptions({ maxInstances: 10, region: "asia-south1" });
 
 const db = getFirestore();
 
@@ -33,9 +33,9 @@ function normalizePhoneNumber(raw: string) {
   return `+${digits}`;
 }
 
-function conversationIdFor(leftId: string, rightId: string) {
-  return [leftId, rightId].sort().join(":");
-}
+// function conversationIdFor(leftId: string, rightId: string) {
+//   return [leftId, rightId].sort().join(":");
+// }
 
 export const lookupUserByPhone = onCall(async (request) => {
   requireAuth(request as CallableContext);
@@ -52,7 +52,7 @@ export const lookupUserByPhone = onCall(async (request) => {
     .get();
 
   if (snapshot.empty) {
-    return {found: false};
+    return { found: false };
   }
 
   const user = snapshot.docs[0].data();
@@ -91,10 +91,10 @@ export const upsertUserProfile = onCall(async (request) => {
       ...payload,
       createdAt: request.data?.createdAt ?? new Date().toISOString(),
     },
-    {merge: true},
+    { merge: true },
   );
 
-  return {ok: true};
+  return { ok: true };
 });
 
 export const syncContacts = onCall(async (request) => {
@@ -107,7 +107,7 @@ export const syncContacts = onCall(async (request) => {
 
   const normalized = Array.from(new Set(phoneNumbers.map(normalizePhoneNumber).filter(Boolean)));
   if (normalized.length === 0) {
-    return {users: []};
+    return { users: [] };
   }
 
   const chunks: string[][] = [];
@@ -131,7 +131,7 @@ export const syncContacts = onCall(async (request) => {
     }
   }
 
-  return {users};
+  return { users };
 });
 
 export const createEventGroup = onCall(async (request) => {
@@ -153,5 +153,5 @@ export const createEventGroup = onCall(async (request) => {
     updatedAt: new Date().toISOString(),
   });
 
-  return {groupId: groupRef.id};
+  return { groupId: groupRef.id };
 });

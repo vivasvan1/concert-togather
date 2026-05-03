@@ -43,6 +43,12 @@ service cloud.firestore {
       allow read, write: if isSignedIn();
     }
 
+    match /messages/{messageId} {
+      allow read: if isSignedIn() && resource.data.recipientId == request.auth.uid;
+      allow create: if isSignedIn();
+      allow update, delete: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

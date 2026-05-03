@@ -28,7 +28,7 @@ export type FirebaseUserProfile = {
 };
 
 export async function upsertFirebaseUserProfile(user: UserIdentity) {
-  await functions().httpsCallable("upsertUserProfile")({
+  await functions("asia-south1").httpsCallable("upsertUserProfile")({
     phoneNumber: user.phoneNumber,
     phoneNumberDisplay: user.phoneNumberDisplay,
     displayName: user.displayName,
@@ -43,7 +43,7 @@ export async function lookupFirebaseUserByPhone(phoneNumber: string) {
     return undefined;
   }
 
-  const response = await functions().httpsCallable("lookupUserByPhone")({
+  const response = await functions("asia-south1").httpsCallable("lookupUserByPhone")({
     phoneNumber: normalizedPhoneNumber,
   }) as { data: LookupUserResponse };
 
@@ -51,11 +51,19 @@ export async function lookupFirebaseUserByPhone(phoneNumber: string) {
 }
 
 export async function syncContactsToBackend(phoneNumbers: string[]) {
-  const response = await functions().httpsCallable("syncContacts")({
+  const response = await functions("asia-south1").httpsCallable("syncContacts")({
     phoneNumbers,
   }) as { data: { users: FirebaseUserProfile[] } };
 
   return response.data?.users || [];
+}
+
+export async function sendMessageToFirebase(envelope: any, recipientId: string) {
+  await firestore().collection("messages").add({
+    envelope,
+    recipientId,
+    createdAt: firestore.FieldValue.serverTimestamp(),
+  });
 }
 
 export async function loadFirebaseUsersByIds(userIds: string[]) {

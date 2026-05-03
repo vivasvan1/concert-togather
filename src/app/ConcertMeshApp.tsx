@@ -1,6 +1,8 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useRef } from "react";
 import {
+  Animated,
   BackHandler,
+  Dimensions,
   Platform,
   Pressable,
   SafeAreaView,
@@ -10,6 +12,7 @@ import {
   Text,
   TextInput,
   View,
+  ActivityIndicator,
 } from "react-native";
 
 import { RelayDebugPanel } from "../components/RelayDebugPanel";
@@ -21,7 +24,12 @@ import {
 } from "../services/firebase/FirebasePhoneAuthService";
 import { getPlatformCapabilities } from "../services/platform/capabilities";
 import { useAppState } from "../state/AppContext";
-import type { ChatMessage, DeliveryState, DeviceContact, FriendProfile } from "../types/domain";
+import type {
+  ChatMessage,
+  DeliveryState,
+  DeviceContact,
+  FriendProfile,
+} from "../types/domain";
 import { formatTimeLabel, minutesAgo } from "../utils/date";
 import {
   formatPhoneNumber,
@@ -37,7 +45,8 @@ const TABS: Array<{ key: TabKey; label: string }> = [
   { key: "discover", label: "People" },
 ];
 
-const androidTopInset = Platform.OS === "android" ? NativeStatusBar.currentHeight ?? 0 : 0;
+const androidTopInset =
+  Platform.OS === "android" ? (NativeStatusBar.currentHeight ?? 0) : 0;
 
 function getReceiptLabel(state: DeliveryState) {
   if (state === "read") {
@@ -105,8 +114,8 @@ function getNearbyServiceLine(
 
   if (transportConnectionState === "connecting") {
     return platformOs === "ios"
-      ? "Trying relay and internet assist"
-      : "Trying nearby and internet assist";
+      ? "Trying relay and internet access"
+      : "Trying nearby and internet access";
   }
 
   if (platformOs === "ios") {
@@ -116,7 +125,9 @@ function getNearbyServiceLine(
   }
 
   if (nearbyPermissionState !== "granted") {
-    return transportError || "Nearby delivery is waiting for Android permissions";
+    return (
+      transportError || "Nearby delivery is waiting for Android permissions"
+    );
   }
 
   return "Nearby is active. Internet relay connects when reachable";
@@ -146,12 +157,42 @@ export function ConcertMeshApp() {
   const [phoneNumber, setPhoneNumber] = useState("");
   const [profileName, setProfileName] = useState("");
   const [otpCode, setOtpCode] = useState("");
-  const [phoneConfirmation, setPhoneConfirmation] = useState<PhoneConfirmationResult | null>(null);
+  const [phoneConfirmation, setPhoneConfirmation] =
+    useState<PhoneConfirmationResult | null>(null);
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState("");
   const [draft, setDraft] = useState("");
   const [relayUrlDraft, setRelayUrlDraft] = useState(state.relayServerUrl);
   const [showNewChat, setShowNewChat] = useState(false);
+  const [isSyncingContacts, setIsSyncingContacts] = useState(false);
+  const slideAnim = useRef(
+    new Animated.Value(Dimensions.get("window").width),
+  ).current;
+
+  const handleSyncContacts = async () => {
+    try {
+      setIsSyncingContacts(true);
+      await syncContacts();
+    } catch (err) {
+      console.error("Failed to sync contacts:", err);
+    } finally {
+      setIsSyncingContacts(false);
+    }
+  };
+
+  useEffect(() => {
+    Animated.timing(slideAnim, {
+      toValue: showNewChat ? 0 : Dimensions.get("window").width,
+      duration: 300,
+      useNativeDriver: true,
+    }).start();
+
+    if (showNewChat && state.contactsPermissionState === "granted") {
+      handleSyncContacts().catch(() => undefined);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showNewChat, slideAnim, state.contactsPermissionState]);
+
   const [searchQuery, setSearchQuery] = useState("");
   const [openedUnreadMarker, setOpenedUnreadMarker] = useState<{
     friendId: string;
@@ -183,7 +224,8 @@ export function ConcertMeshApp() {
         );
         const sorted = [...messages].sort(
           (left, right) =>
-            new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime() ||
+            new Date(right.createdAt).getTime() -
+              new Date(left.createdAt).getTime() ||
             right.messageId.localeCompare(left.messageId),
         );
         const latest = sorted[0];
@@ -209,23 +251,41 @@ export function ConcertMeshApp() {
 
   const selectedFriend =
     state.friends.find((friend) => friend.id === state.selectedChatFriendId) ??
-    conversationSummaries.find((item) => item.friend.id === state.selectedChatFriendId)?.friend;
+    conversationSummaries.find(
+      (item) => item.friend.id === state.selectedChatFriendId,
+    )?.friend;
 
   useEffect(() => {
     if (Platform.OS !== "android" || !selectedFriend) {
       return;
     }
 
-    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
-      setOpenedUnreadMarker(undefined);
-      setSelectedChatFriend(undefined);
-      return true;
-    });
+    const subscription = BackHandler.addEventListener(
+      "hardwareBackPress",
+      () => {
+        if (showNewChat) {
+          setShowNewChat(false);
+          return true;
+        }
+        if (openedUnreadMarker || state.selectedChatFriendId) {
+          setOpenedUnreadMarker(undefined);
+          setSelectedChatFriend(undefined);
+          return true;
+        }
+        return false;
+      },
+    );
 
     return () => {
       subscription.remove();
     };
-  }, [selectedFriend, setSelectedChatFriend]);
+  }, [
+    selectedFriend,
+    setSelectedChatFriend,
+    showNewChat,
+    openedUnreadMarker,
+    state.selectedChatFriendId,
+  ]);
 
   const selectedChatMessages = useMemo(() => {
     if (!state.user || !selectedFriend) {
@@ -244,13 +304,17 @@ export function ConcertMeshApp() {
       )
       .sort(
         (left, right) =>
-          new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime() ||
+          new Date(left.createdAt).getTime() -
+            new Date(right.createdAt).getTime() ||
           left.messageId.localeCompare(right.messageId),
       );
   }, [selectedFriend, state.messages, state.user]);
 
   const matchedPeerIds = useMemo(
-    () => new Set(state.transportPeers.map((peer) => peer.phoneNumber).filter(Boolean)),
+    () =>
+      new Set(
+        state.transportPeers.map((peer) => peer.phoneNumber).filter(Boolean),
+      ),
     [state.transportPeers],
   );
 
@@ -268,7 +332,9 @@ export function ConcertMeshApp() {
       );
     });
 
-    const friendPhoneNumbers = new Set(friendMatches.map((friend) => friend.phoneNumber));
+    const friendPhoneNumbers = new Set(
+      friendMatches.map((friend) => friend.phoneNumber),
+    );
     const contactMatches = state.contacts.filter((contact) => {
       if (friendPhoneNumbers.has(contact.phoneNumber)) {
         return false;
@@ -329,13 +395,15 @@ export function ConcertMeshApp() {
           message.kind === "chat" &&
           message.senderId === friendId &&
           message.unread &&
-          ((message.senderId === currentUserId && message.recipientIds.includes(friendId)) ||
+          ((message.senderId === currentUserId &&
+            message.recipientIds.includes(friendId)) ||
             (message.senderId === friendId &&
               message.recipientIds.includes(currentUserId))),
       )
       .sort(
         (left, right) =>
-          new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime() ||
+          new Date(left.createdAt).getTime() -
+            new Date(right.createdAt).getTime() ||
           left.messageId.localeCompare(right.messageId),
       );
 
@@ -426,10 +494,10 @@ export function ConcertMeshApp() {
             }}
             style={({ pressed }) => [
               styles.primaryButton,
-              ((!isLikelyPhoneNumber(normalizedPhone) ||
+              (!isLikelyPhoneNumber(normalizedPhone) ||
                 (phoneConfirmation ? otpCode.trim().length < 4 : false) ||
                 authBusy) &&
-                styles.disabledButton),
+                styles.disabledButton,
               pressed && styles.buttonPressed,
             ]}
             disabled={
@@ -485,8 +553,12 @@ export function ConcertMeshApp() {
                   <Text style={styles.backButtonLabel}>‹</Text>
                 </Pressable>
                 <View style={styles.friendMeta}>
-                  <Text style={styles.rowTitle}>{selectedFriend.displayName}</Text>
-                  <Text style={styles.rowMeta}>{selectedFriend.phoneNumberDisplay}</Text>
+                  <Text style={styles.rowTitle}>
+                    {selectedFriend.displayName}
+                  </Text>
+                  <Text style={styles.rowMeta}>
+                    {selectedFriend.phoneNumberDisplay}
+                  </Text>
                 </View>
                 <Text style={[styles.badge, styles.mutedBadge]}>
                   {getChatStatusLabel(selectedFriend)}
@@ -495,7 +567,9 @@ export function ConcertMeshApp() {
 
               {selectedFriend.chatStatus !== "accepted" ? (
                 <View style={styles.requestBanner}>
-                  <Text style={styles.rowTitle}>{getChatStatusLabel(selectedFriend)}</Text>
+                  <Text style={styles.rowTitle}>
+                    {getChatStatusLabel(selectedFriend)}
+                  </Text>
                   {selectedFriend.chatStatus === "invitable-unregistered" ? (
                     <Pressable
                       onPress={() =>
@@ -529,16 +603,22 @@ export function ConcertMeshApp() {
                     return (
                       <View key={message.messageId}>
                         {openedUnreadMarker?.friendId === selectedFriend.id &&
-                        openedUnreadMarker.firstMessageId === message.messageId ? (
+                        openedUnreadMarker.firstMessageId ===
+                          message.messageId ? (
                           <View style={styles.unreadMarkerRow}>
                             <Text style={styles.unreadMarkerText}>
                               {openedUnreadMarker.count} unread{" "}
-                              {openedUnreadMarker.count === 1 ? "message" : "messages"}
+                              {openedUnreadMarker.count === 1
+                                ? "message"
+                                : "messages"}
                             </Text>
                           </View>
                         ) : null}
                         <View
-                          style={[styles.messageRow, isMine && styles.messageRowMine]}
+                          style={[
+                            styles.messageRow,
+                            isMine && styles.messageRowMine,
+                          ]}
                         >
                           <View
                             style={[
@@ -546,7 +626,9 @@ export function ConcertMeshApp() {
                               isMine && styles.messageBubbleMine,
                             ]}
                           >
-                            <Text style={styles.messageText}>{message.plaintextPreview}</Text>
+                            <Text style={styles.messageText}>
+                              {message.plaintextPreview}
+                            </Text>
                             <View style={styles.messageFooter}>
                               <Text style={styles.messageMeta}>
                                 {formatTimeLabel(message.createdAt)}
@@ -587,11 +669,14 @@ export function ConcertMeshApp() {
                   style={({ pressed }) => [
                     styles.primaryButton,
                     styles.composeButton,
-                    (selectedFriend.chatStatus !== "accepted" || !draft.trim()) &&
+                    (selectedFriend.chatStatus !== "accepted" ||
+                      !draft.trim()) &&
                       styles.disabledButton,
                     pressed && styles.buttonPressed,
                   ]}
-                  disabled={selectedFriend.chatStatus !== "accepted" || !draft.trim()}
+                  disabled={
+                    selectedFriend.chatStatus !== "accepted" || !draft.trim()
+                  }
                 >
                   <Text style={styles.primaryButtonLabel}>Send</Text>
                 </Pressable>
@@ -629,103 +714,161 @@ export function ConcertMeshApp() {
             {activeTab === "chats" ? (
               <>
                 {!selectedFriend ? (
-                <>
-                  <SectionCard title="Chats">
-                    <View style={styles.chatToolbar}>
-                      <View style={styles.searchShell}>
-                        <TextInput
-                          value={searchQuery}
-                          onChangeText={setSearchQuery}
-                          style={styles.searchInput}
-                          placeholder="Search chats or numbers"
-                          placeholderTextColor="#7A8797"
-                        />
+                  <>
+                    <SectionCard title="Chats">
+                      <View style={styles.chatToolbar}>
+                        <View style={styles.searchShell}>
+                          <TextInput
+                            value={searchQuery}
+                            onChangeText={setSearchQuery}
+                            style={styles.searchInput}
+                            placeholder="Search chats or numbers"
+                            placeholderTextColor="#7A8797"
+                          />
+                        </View>
+                        <Pressable
+                          onPress={() => setShowNewChat(true)}
+                          style={({ pressed }) => [
+                            styles.secondaryButton,
+                            styles.toolbarButton,
+                            pressed && styles.buttonPressed,
+                          ]}
+                        >
+                          <Text style={styles.secondaryLabel}>New chat</Text>
+                        </Pressable>
                       </View>
+
+                      {conversationSummaries.length === 0 ? (
+                        <Text style={styles.emptyStateLabel}>No chats yet</Text>
+                      ) : (
+                        conversationSummaries.map(
+                          ({ friend, latest, unreadCount }) => (
+                            <Pressable
+                              key={friend.id}
+                              onPress={() => openChat(friend.id)}
+                              style={({ pressed }) => [
+                                styles.inboxRow,
+                                pressed && styles.buttonPressed,
+                              ]}
+                            >
+                              <View style={styles.avatar}>
+                                <Text style={styles.avatarLabel}>
+                                  {friend.displayName.slice(0, 1).toUpperCase()}
+                                </Text>
+                              </View>
+                              <View style={styles.inboxBody}>
+                                <View style={styles.inboxHeadline}>
+                                  <Text style={styles.rowTitle}>
+                                    {friend.displayName}
+                                  </Text>
+                                  <Text style={styles.rowMeta}>
+                                    {latest
+                                      ? formatTimeLabel(latest.createdAt)
+                                      : formatTimeLabel(friend.lastSeenAt)}
+                                  </Text>
+                                </View>
+                                <View style={styles.inboxHeadline}>
+                                  <Text
+                                    style={[
+                                      styles.rowMeta,
+                                      unreadCount > 0 && styles.unreadPreview,
+                                    ]}
+                                    numberOfLines={1}
+                                  >
+                                    {getConversationPreview(
+                                      friend,
+                                      latest,
+                                      state.user?.id,
+                                    )}
+                                  </Text>
+                                  {unreadCount > 0 ? (
+                                    <Text
+                                      style={[styles.badge, styles.goodBadge]}
+                                    >
+                                      {unreadCount}
+                                    </Text>
+                                  ) : friend.chatStatus !== "accepted" ? (
+                                    <Text
+                                      style={[styles.badge, styles.mutedBadge]}
+                                    >
+                                      Invite
+                                    </Text>
+                                  ) : null}
+                                </View>
+                              </View>
+                            </Pressable>
+                          ),
+                        )
+                      )}
+                    </SectionCard>
+                  </>
+                ) : null}
+              </>
+            ) : null}
+
+            {activeTab === "discover" ? (
+              <>
+                <SectionCard title="Nearby">
+                  <View style={styles.row}>
+                    <View style={styles.friendMeta}>
+                      <Text style={styles.rowTitle}>Nearby</Text>
+                      <Text style={styles.rowMeta}>
+                        {Platform.OS === "ios"
+                          ? "Direct iPhone mesh is pending. Use relay mode for now."
+                          : "Grant access to discover nearby Android phones directly."}
+                      </Text>
+                    </View>
+                    {Platform.OS === "android" &&
+                    state.nearbyPermissionState !== "granted" ? (
                       <Pressable
-                        onPress={() => setShowNewChat((value) => !value)}
+                        onPress={requestNearbyAccess}
                         style={({ pressed }) => [
                           styles.secondaryButton,
-                          styles.toolbarButton,
+                          styles.inlineSecondary,
                           pressed && styles.buttonPressed,
                         ]}
                       >
-                        <Text style={styles.secondaryLabel}>
-                        {showNewChat ? "Close" : "New chat"}
-                        </Text>
+                        <Text style={styles.secondaryLabel}>Grant access</Text>
                       </Pressable>
-                    </View>
+                    ) : (
+                      <Text
+                        style={[
+                          styles.badge,
+                          Platform.OS === "ios"
+                            ? styles.mutedBadge
+                            : styles.goodBadge,
+                        ]}
+                      >
+                        {Platform.OS === "ios" ? "Relay-first" : "Always on"}
+                      </Text>
+                    )}
+                  </View>
+                </SectionCard>
 
-                    {showNewChat ? (
-                      <View style={styles.newChatPanel}>
-                        <View style={styles.newChatHeader}>
-                          <Text style={styles.sectionEyebrow}>Contacts</Text>
-                          <Pressable
-                            onPress={syncContacts}
-                            style={({ pressed }) => [
-                              styles.secondaryButton,
-                              styles.compactButton,
-                              pressed && styles.buttonPressed,
-                            ]}
-                          >
-                            <Text style={styles.secondaryLabel}>
-                              {state.contactsPermissionState === "granted"
-                                ? "Refresh"
-                                : state.contactsPermissionState === "denied"
-                                  ? "Retry permission"
-                                  : "Sync contacts"}
+                <SectionCard title="Nearby phones">
+                  {state.transportPeers.length === 0 ? (
+                    <Text style={styles.emptyStateLabel}>
+                      {Platform.OS === "ios"
+                        ? "No relay peers yet"
+                        : "No nearby phones"}
+                    </Text>
+                  ) : (
+                    state.transportPeers.map((peer) => {
+                      const friend = state.friends.find(
+                        (item) => item.id === peer.id,
+                      );
+                      return (
+                        <View key={peer.id} style={styles.friendCard}>
+                          <View style={styles.friendMeta}>
+                            <Text style={styles.rowTitle}>
+                              {peer.phoneNumberDisplay || peer.alias}
                             </Text>
-                          </Pressable>
-                        </View>
-
-                        {newChatMatches.manualPhoneNumber &&
-                        !newChatMatches.friendMatches.some(
-                          (friend) => friend.phoneNumber === newChatMatches.manualPhoneNumber,
-                        ) ? (
-                          <Pressable
-                            onPress={() => {
-                              inviteContact(newChatMatches.manualPhoneNumber);
-                              setShowNewChat(false);
-                              setSearchQuery("");
-                            }}
-                            style={({ pressed }) => [
-                              styles.contactRow,
-                              pressed && styles.buttonPressed,
-                            ]}
-                          >
-                            <View style={styles.avatar}>
-                              <Text style={styles.avatarLabel}>#</Text>
-                            </View>
-                            <View style={styles.friendMeta}>
-                              <Text style={styles.rowTitle}>{formatPhoneNumber(newChatMatches.manualPhoneNumber)}</Text>
-                            </View>
-                            <Text style={[styles.badge, styles.mutedBadge]}>Invite</Text>
-                          </Pressable>
-                        ) : null}
-
-                        {newChatMatches.friendMatches.map((friend) => (
-                          <Pressable
-                            key={friend.id}
-                            onPress={async () => {
-                              await openChat(friend.id);
-                              setShowNewChat(false);
-                              setSearchQuery("");
-                            }}
-                            style={({ pressed }) => [
-                              styles.contactRow,
-                              pressed && styles.buttonPressed,
-                            ]}
-                          >
-                            <View style={styles.avatar}>
-                              <Text style={styles.avatarLabel}>
-                                {friend.displayName.slice(0, 1).toUpperCase()}
-                              </Text>
-                            </View>
-                            <View style={styles.friendMeta}>
-                              <Text style={styles.rowTitle}>{friend.displayName}</Text>
-                              <Text style={styles.rowMeta}>
-                                {friend.phoneNumberDisplay} · {getChatStatusLabel(friend)}
-                              </Text>
-                            </View>
+                            <Text style={styles.rowMeta}>
+                              In range over {peer.via} · seen{" "}
+                              {minutesAgo(peer.lastSeenAt)}m ago
+                            </Text>
+                          </View>
+                          {friend ? (
                             <Text
                               style={[
                                 styles.badge,
@@ -734,256 +877,71 @@ export function ConcertMeshApp() {
                                   : styles.mutedBadge,
                               ]}
                             >
-                              {friend.chatStatus === "accepted" ? "Open" : "View"}
+                              {getChatStatusLabel(friend)}
                             </Text>
-                          </Pressable>
-                        ))}
-
-                        {newChatMatches.contactMatches.map((contact: DeviceContact) => (
-                          <Pressable
-                            key={contact.id}
-                            onPress={() => {
-                              inviteContact(contact.phoneNumber, contact.displayName);
-                              setShowNewChat(false);
-                              setSearchQuery("");
-                            }}
-                            style={({ pressed }) => [
-                              styles.contactRow,
-                              pressed && styles.buttonPressed,
-                            ]}
-                          >
-                            <View style={styles.avatar}>
-                              <Text style={styles.avatarLabel}>
-                                {contact.displayName.slice(0, 1).toUpperCase()}
-                              </Text>
-                            </View>
-                            <View style={styles.friendMeta}>
-                              <Text style={styles.rowTitle}>{contact.displayName}</Text>
-                              <Text style={styles.rowMeta}>{contact.phoneNumberDisplay}</Text>
-                            </View>
-                            <Text
-                              style={[
-                                styles.badge,
-                                matchedPeerIds.has(contact.phoneNumber)
-                                  ? styles.goodBadge
-                                  : styles.mutedBadge,
+                          ) : (
+                            <Pressable
+                              onPress={() =>
+                                inviteContact(peer.phoneNumber ?? peer.alias)
+                              }
+                              style={({ pressed }) => [
+                                styles.secondaryButton,
+                                pressed && styles.buttonPressed,
                               ]}
                             >
-                              {matchedPeerIds.has(contact.phoneNumber) ? "Request" : "Invite"}
-                            </Text>
-                          </Pressable>
-                        ))}
-
-                        {newChatMatches.peerMatches.map((peer) => (
-                          <Pressable
-                            key={peer.id}
-                            onPress={() => {
-                              inviteContact(peer.phoneNumber ?? peer.alias, peer.alias);
-                              setShowNewChat(false);
-                              setSearchQuery("");
-                            }}
-                            style={({ pressed }) => [
-                              styles.contactRow,
-                              pressed && styles.buttonPressed,
-                            ]}
-                          >
-                            <View style={styles.avatar}>
-                              <Text style={styles.avatarLabel}>+</Text>
-                            </View>
-                            <View style={styles.friendMeta}>
-                              <Text style={styles.rowTitle}>
-                                {peer.phoneNumberDisplay || peer.alias}
-                              </Text>
-                            </View>
-                            <Text style={[styles.badge, styles.goodBadge]}>Request</Text>
-                          </Pressable>
-                        ))}
-                      </View>
-                    ) : null}
-
-                    {conversationSummaries.length === 0 ? (
-                      <Text style={styles.emptyStateLabel}>No chats yet</Text>
-                    ) : (
-                      conversationSummaries.map(({ friend, latest, unreadCount }) => (
-                        <Pressable
-                          key={friend.id}
-                          onPress={() => openChat(friend.id)}
-                          style={({ pressed }) => [
-                            styles.inboxRow,
-                            pressed && styles.buttonPressed,
-                          ]}
-                        >
-                          <View style={styles.avatar}>
-                            <Text style={styles.avatarLabel}>
-                              {friend.displayName.slice(0, 1).toUpperCase()}
-                            </Text>
-                          </View>
-                          <View style={styles.inboxBody}>
-                            <View style={styles.inboxHeadline}>
-                              <Text style={styles.rowTitle}>{friend.displayName}</Text>
-                              <Text style={styles.rowMeta}>
-                                {latest
-                                  ? formatTimeLabel(latest.createdAt)
-                                  : formatTimeLabel(friend.lastSeenAt)}
-                              </Text>
-                            </View>
-                            <View style={styles.inboxHeadline}>
-                              <Text
-                                style={[
-                                  styles.rowMeta,
-                                  unreadCount > 0 && styles.unreadPreview,
-                                ]}
-                                numberOfLines={1}
-                              >
-                                {getConversationPreview(friend, latest, state.user?.id)}
-                              </Text>
-                              {unreadCount > 0 ? (
-                                <Text style={[styles.badge, styles.goodBadge]}>
-                                  {unreadCount}
-                                </Text>
-                              ) : friend.chatStatus !== "accepted" ? (
-                                <Text style={[styles.badge, styles.mutedBadge]}>
-                                  Invite
-                                </Text>
-                              ) : null}
-                            </View>
-                          </View>
-                        </Pressable>
-                      ))
-                    )}
-                  </SectionCard>
-                </>
-              ) : null}
-            </>
-          ) : null}
-
-          {activeTab === "discover" ? (
-            <>
-              <SectionCard title="Nearby">
-                <View style={styles.row}>
-                  <View style={styles.friendMeta}>
-                    <Text style={styles.rowTitle}>Nearby</Text>
-                    <Text style={styles.rowMeta}>
-                      {Platform.OS === "ios"
-                        ? "Direct iPhone mesh is pending. Use relay mode for now."
-                        : "Grant access to discover nearby Android phones directly."}
-                    </Text>
-                  </View>
-                  {Platform.OS === "android" && state.nearbyPermissionState !== "granted" ? (
-                    <Pressable
-                      onPress={requestNearbyAccess}
-                      style={({ pressed }) => [
-                        styles.secondaryButton,
-                        styles.inlineSecondary,
-                        pressed && styles.buttonPressed,
-                      ]}
-                    >
-                      <Text style={styles.secondaryLabel}>Grant access</Text>
-                    </Pressable>
-                  ) : (
-                    <Text
-                      style={[
-                        styles.badge,
-                        Platform.OS === "ios" ? styles.mutedBadge : styles.goodBadge,
-                      ]}
-                    >
-                      {Platform.OS === "ios" ? "Relay-first" : "Always on"}
-                    </Text>
-                  )}
-                </View>
-              </SectionCard>
-
-
-
-              <SectionCard title="Nearby phones">
-                {state.transportPeers.length === 0 ? (
-                  <Text style={styles.emptyStateLabel}>
-                    {Platform.OS === "ios" ? "No relay peers yet" : "No nearby phones"}
-                  </Text>
-                ) : (
-                  state.transportPeers.map((peer) => {
-                    const friend = state.friends.find((item) => item.id === peer.id);
-                    return (
-                      <View key={peer.id} style={styles.friendCard}>
-                        <View style={styles.friendMeta}>
-                          <Text style={styles.rowTitle}>
-                            {peer.phoneNumberDisplay || peer.alias}
-                          </Text>
-                          <Text style={styles.rowMeta}>
-                            In range over {peer.via} · seen{" "}
-                            {minutesAgo(peer.lastSeenAt)}m ago
-                          </Text>
+                              <Text style={styles.secondaryLabel}>Invite</Text>
+                            </Pressable>
+                          )}
                         </View>
-                        {friend ? (
-                          <Text
-                            style={[
-                              styles.badge,
-                              friend.chatStatus === "accepted"
-                                ? styles.goodBadge
-                                : styles.mutedBadge,
-                            ]}
-                          >
-                            {getChatStatusLabel(friend)}
-                          </Text>
-                        ) : (
-                          <Pressable
-                            onPress={() => inviteContact(peer.phoneNumber ?? peer.alias)}
-                            style={({ pressed }) => [
-                              styles.secondaryButton,
-                              pressed && styles.buttonPressed,
-                            ]}
-                          >
-                            <Text style={styles.secondaryLabel}>Invite</Text>
-                          </Pressable>
-                        )}
-                      </View>
-                    );
-                  })
-                )}
-              </SectionCard>
+                      );
+                    })
+                  )}
+                </SectionCard>
 
-              <SectionCard title="Internet assist">
-                <TextInput
-                  value={relayUrlDraft}
-                  onChangeText={setRelayUrlDraft}
-                  style={styles.input}
-                  placeholder="ws://192.168.x.x:8787/ws"
-                  placeholderTextColor="#6F7E90"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                />
-                <Pressable
-                  onPress={() => setRelayServerUrl(relayUrlDraft.trim())}
-                  style={({ pressed }) => [
-                    styles.secondaryButton,
-                    pressed && styles.buttonPressed,
-                  ]}
-                >
+                <SectionCard title="Internet assist">
+                  <TextInput
+                    value={relayUrlDraft}
+                    onChangeText={setRelayUrlDraft}
+                    style={styles.input}
+                    placeholder="ws://192.168.x.x:8787/ws"
+                    placeholderTextColor="#6F7E90"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                  <Pressable
+                    onPress={() => setRelayServerUrl(relayUrlDraft.trim())}
+                    style={({ pressed }) => [
+                      styles.secondaryButton,
+                      pressed && styles.buttonPressed,
+                    ]}
+                  >
                     <Text style={styles.secondaryLabel}>Apply relay URL</Text>
                   </Pressable>
-              </SectionCard>
+                </SectionCard>
 
-              <SectionCard title="Device">
-                {capabilities.map((capability) => (
-                  <View key={capability.kind} style={styles.row}>
-                    <View style={styles.friendMeta}>
-                      <Text style={styles.rowTitle}>{capability.label}</Text>
+                <SectionCard title="Device">
+                  {capabilities.map((capability) => (
+                    <View key={capability.kind} style={styles.row}>
+                      <View style={styles.friendMeta}>
+                        <Text style={styles.rowTitle}>{capability.label}</Text>
+                      </View>
+                      <Text
+                        style={[
+                          styles.badge,
+                          capability.available
+                            ? styles.goodBadge
+                            : styles.mutedBadge,
+                        ]}
+                      >
+                        {capability.available ? "Ready" : "Limited"}
+                      </Text>
                     </View>
-                    <Text
-                      style={[
-                        styles.badge,
-                        capability.available ? styles.goodBadge : styles.mutedBadge,
-                      ]}
-                    >
-                      {capability.available ? "Ready" : "Limited"}
-                    </Text>
-                  </View>
-                ))}
-              </SectionCard>
+                  ))}
+                </SectionCard>
 
-              {__DEV__ && <RelayDebugPanel />}
-            </>
-          ) : null}
+                {__DEV__ && <RelayDebugPanel />}
+              </>
+            ) : null}
           </ScrollView>
         )}
 
@@ -1010,6 +968,197 @@ export function ConcertMeshApp() {
           ))}
         </View>
       </View>
+
+      <Animated.View
+        style={[
+          styles.newChatPageOverlay,
+          { transform: [{ translateX: slideAnim }] },
+        ]}
+      >
+        <SafeAreaView style={styles.safeArea}>
+          <View style={[styles.chatHeader, styles.newChatPageHeader]}>
+            <Pressable
+              onPress={() => setShowNewChat(false)}
+              style={({ pressed }) => [
+                styles.backButton,
+                pressed && styles.buttonPressed,
+              ]}
+            >
+              <Text style={styles.backButtonLabel}>‹</Text>
+            </Pressable>
+            <View style={styles.friendMeta}>
+              <Text style={styles.rowTitle}>New Chat</Text>
+            </View>
+          </View>
+
+          <View style={styles.newChatSearchRow}>
+            <View style={styles.searchShell}>
+              <TextInput
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                style={styles.searchInput}
+                placeholder="Search contacts or numbers"
+                placeholderTextColor="#7A8797"
+              />
+            </View>
+          </View>
+
+          <ScrollView contentContainerStyle={styles.scrollContent}>
+            <View style={styles.newChatHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Text style={styles.sectionEyebrow}>Contacts</Text>
+                {isSyncingContacts && <ActivityIndicator size="small" color="#667781" />}
+              </View>
+              <Pressable
+                onPress={handleSyncContacts}
+                disabled={isSyncingContacts}
+                style={({ pressed }) => [
+                  styles.secondaryButton,
+                  styles.compactButton,
+                  (pressed || isSyncingContacts) && styles.buttonPressed,
+                ]}
+              >
+                <Text style={styles.secondaryLabel}>
+                  {state.contactsPermissionState === "granted"
+                    ? "Refresh Contacts"
+                    : state.contactsPermissionState === "denied"
+                      ? "Retry Permission"
+                      : "Sync Contacts"}
+                </Text>
+              </Pressable>
+            </View>
+
+            {newChatMatches.manualPhoneNumber &&
+            !newChatMatches.friendMatches.some(
+              (friend) =>
+                friend.phoneNumber === newChatMatches.manualPhoneNumber,
+            ) ? (
+              <Pressable
+                onPress={() => {
+                  inviteContact(newChatMatches.manualPhoneNumber);
+                  setShowNewChat(false);
+                  setSearchQuery("");
+                }}
+                style={({ pressed }) => [
+                  styles.contactRow,
+                  pressed && styles.buttonPressed,
+                ]}
+              >
+                <View style={styles.avatar}>
+                  <Text style={styles.avatarLabel}>#</Text>
+                </View>
+                <View style={styles.friendMeta}>
+                  <Text style={styles.rowTitle}>
+                    {formatPhoneNumber(newChatMatches.manualPhoneNumber)}
+                  </Text>
+                </View>
+                <Text style={[styles.badge, styles.mutedBadge]}>Invite</Text>
+              </Pressable>
+            ) : null}
+
+            {newChatMatches.friendMatches.map((friend) => (
+              <Pressable
+                key={friend.id}
+                onPress={async () => {
+                  await openChat(friend.id);
+                  setShowNewChat(false);
+                  setSearchQuery("");
+                }}
+                style={({ pressed }) => [
+                  styles.contactRow,
+                  pressed && styles.buttonPressed,
+                ]}
+              >
+                <View style={styles.avatar}>
+                  <Text style={styles.avatarLabel}>
+                    {friend.displayName.slice(0, 1).toUpperCase()}
+                  </Text>
+                </View>
+                <View style={styles.friendMeta}>
+                  <Text style={styles.rowTitle}>{friend.displayName}</Text>
+                  <Text style={styles.rowMeta}>
+                    {friend.phoneNumberDisplay} · {getChatStatusLabel(friend)}
+                  </Text>
+                </View>
+                <Text
+                  style={[
+                    styles.badge,
+                    friend.chatStatus === "accepted"
+                      ? styles.goodBadge
+                      : styles.mutedBadge,
+                  ]}
+                >
+                  {friend.chatStatus === "accepted" ? "Open" : "View"}
+                </Text>
+              </Pressable>
+            ))}
+
+            {newChatMatches.contactMatches.map((contact: DeviceContact) => (
+              <Pressable
+                key={contact.id}
+                onPress={() => {
+                  inviteContact(contact.phoneNumber, contact.displayName);
+                  setShowNewChat(false);
+                  setSearchQuery("");
+                }}
+                style={({ pressed }) => [
+                  styles.contactRow,
+                  pressed && styles.buttonPressed,
+                ]}
+              >
+                <View style={styles.avatar}>
+                  <Text style={styles.avatarLabel}>
+                    {contact.displayName.slice(0, 1).toUpperCase()}
+                  </Text>
+                </View>
+                <View style={styles.friendMeta}>
+                  <Text style={styles.rowTitle}>{contact.displayName}</Text>
+                  <Text style={styles.rowMeta}>
+                    {contact.phoneNumberDisplay}
+                  </Text>
+                </View>
+                <Text
+                  style={[
+                    styles.badge,
+                    matchedPeerIds.has(contact.phoneNumber)
+                      ? styles.goodBadge
+                      : styles.mutedBadge,
+                  ]}
+                >
+                  {matchedPeerIds.has(contact.phoneNumber)
+                    ? "Request"
+                    : "Invite"}
+                </Text>
+              </Pressable>
+            ))}
+
+            {newChatMatches.peerMatches.map((peer) => (
+              <Pressable
+                key={peer.id}
+                onPress={() => {
+                  inviteContact(peer.phoneNumber ?? peer.alias, peer.alias);
+                  setShowNewChat(false);
+                  setSearchQuery("");
+                }}
+                style={({ pressed }) => [
+                  styles.contactRow,
+                  pressed && styles.buttonPressed,
+                ]}
+              >
+                <View style={styles.avatar}>
+                  <Text style={styles.avatarLabel}>+</Text>
+                </View>
+                <View style={styles.friendMeta}>
+                  <Text style={styles.rowTitle}>
+                    {peer.phoneNumberDisplay || peer.alias}
+                  </Text>
+                </View>
+                <Text style={[styles.badge, styles.goodBadge]}>Request</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </SafeAreaView>
+      </Animated.View>
     </SafeAreaView>
   );
 }
@@ -1452,5 +1601,23 @@ const styles = StyleSheet.create({
   },
   tabLabelActive: {
     color: "#04110B",
+  },
+  newChatPageOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "#0B141A",
+    zIndex: 100,
+  },
+  newChatPageHeader: {
+    paddingHorizontal: 14,
+    paddingTop: 14,
+    paddingBottom: 6,
+  },
+  newChatSearchRow: {
+    paddingHorizontal: 14,
+    paddingBottom: 10,
   },
 });
