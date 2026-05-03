@@ -37,7 +37,6 @@ export function RelayDebugPanel() {
   const [snap, setSnap] = useState<Snapshot>(poll);
 
   useEffect(() => {
-    if (!__DEV__) return;
     const id = setInterval(() => setSnap(poll()), 2000);
     return () => clearInterval(id);
   }, []);
@@ -54,8 +53,6 @@ export function RelayDebugPanel() {
   const handleClear = useCallback(() => {
     relayStore.clearAll().then(() => setSnap(poll()));
   }, []);
-
-  if (!__DEV__) return null;
 
   const now = Date.now();
 

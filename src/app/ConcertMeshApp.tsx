@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BackHandler,
   Platform,
@@ -142,6 +142,19 @@ export function ConcertMeshApp() {
     requestNearbyAccess,
   } = useAppState();
   const [activeTab, setActiveTab] = useState<TabKey>("chats");
+  const [showRelayDebug, setShowRelayDebug] = useState(false);
+  const devTapCount = useRef(0);
+  const devTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleDevTap = useCallback(() => {
+    devTapCount.current += 1;
+    if (devTapTimer.current) clearTimeout(devTapTimer.current);
+    if (devTapCount.current >= 5) {
+      devTapCount.current = 0;
+      setShowRelayDebug((v) => !v);
+    } else {
+      devTapTimer.current = setTimeout(() => { devTapCount.current = 0; }, 2000);
+    }
+  }, []);
   const [countryCode, setCountryCode] = useState("+91");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [profileName, setProfileName] = useState("");
@@ -963,7 +976,7 @@ export function ConcertMeshApp() {
                   </Pressable>
               </SectionCard>
 
-              <SectionCard title="Device">
+              <SectionCard title="Device" onTitlePress={handleDevTap}>
                 {capabilities.map((capability) => (
                   <View key={capability.kind} style={styles.row}>
                     <View style={styles.friendMeta}>
@@ -981,7 +994,7 @@ export function ConcertMeshApp() {
                 ))}
               </SectionCard>
 
-              {__DEV__ && <RelayDebugPanel />}
+              {showRelayDebug && <RelayDebugPanel />}
             </>
           ) : null}
           </ScrollView>

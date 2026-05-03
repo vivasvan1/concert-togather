@@ -1,13 +1,23 @@
 import React from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 
-export function SectionCard({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
+export function SectionCard({
+  title,
+  subtitle,
+  children,
+  onTitlePress,
+}: {
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+  onTitlePress?: () => void;
+}) {
   return (
     <View style={styles.card}>
-      <View style={styles.header}>
+      <Pressable style={styles.header} onPress={onTitlePress} disabled={!onTitlePress}>
         <Text style={styles.title}>{title}</Text>
         {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
-      </View>
+      </Pressable>
       <View style={styles.content}>{children}</View>
     </View>
   );
