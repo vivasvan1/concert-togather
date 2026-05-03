@@ -7,7 +7,7 @@ import React, {
   useReducer,
   useRef,
 } from "react";
-import { Linking, PermissionsAndroid, Platform, Share } from "react-native";
+import { Alert, Linking, PermissionsAndroid, Platform, Share } from "react-native";
 
 import { loadDeviceContacts, requestContactsPermission } from "../services/contacts/ContactsService";
 import {
@@ -1221,16 +1221,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
         try {
           const message = `Hey! Let's connect on Concert Mesh. Download the app to chat with me when we're at the same event!`;
-          const separator = Platform.OS === "ios" ? "&" : "?";
-          const url = `sms:${normalizedPhoneNumber}${separator}body=${encodeURIComponent(message)}`;
+          const encodedMessage = encodeURIComponent(message);
           
-          const supported = await Linking.canOpenURL(url);
-          if (supported) {
-            await Linking.openURL(url);
-          } else {
-            // Fallback to general share if SMS is not available
-            await Share.share({ message });
-          }
+          // WhatsApp expects the phone number without the '+' sign
+          const waNumber = normalizedPhoneNumber.replace("+", "");
+          const waUrl = `whatsapp://send?phone=${waNumber}&text=${encodedMessage}`;
+          Linking.openURL(waUrl).catch(() => {
+            Alert.alert("Error", "Could not open WhatsApp. Is it installed?");
+          });
         } catch (e) {
           // Ignore sharing errors
         }
