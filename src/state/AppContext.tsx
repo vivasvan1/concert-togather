@@ -35,6 +35,7 @@ import {
 import type { MeshTransport } from "../services/mesh/Transport";
 import { WebSocketRelayTransport } from "../services/mesh/WebSocketRelayTransport";
 import { createSeedState } from "../data/mockData";
+import { createReadReceiptForOpenIncomingChat } from "./readReceipts";
 import type {
   AppState,
   ChatMessage,
@@ -1108,8 +1109,36 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           });
 
           const friend = currentState.friends.find((item) => item.id === envelope.senderId);
+          const readAt = new Date().toISOString();
+          const readReceipt = createReadReceiptForOpenIncomingChat({
+            state: currentState,
+            envelope,
+            eventPayload,
+            readAt,
+            createEnvelope: (receiptPayload, receiptFriend) =>
+              createDirectRelayEnvelope(
+                JSON.stringify(receiptPayload),
+                currentState.user!,
+                currentState.event!,
+                [receiptFriend.id],
+                receiptFriend.encryptionPublicKey,
+              ),
+          });
+
+          if (readReceipt) {
+            dispatch({
+              type: "mark-conversation-read",
+              payload: { friendId: readReceipt.friendId, readAt: readReceipt.readAt },
+            });
+            dispatch({
+              type: "mark-seen-envelope",
+              payload: { envelopeId: readReceipt.envelope.id },
+            });
+            transportRef.current.send(readReceipt.envelope).catch(() => undefined);
+          }
+
           if (friend?.encryptionPublicKey) {
-            const sentAt = new Date().toISOString();
+            const sentAt = readReceipt?.readAt ?? readAt;
             const receiptPayload = buildPayload(currentState.user, {
               kind: "delivery-receipt",
               sentAt,

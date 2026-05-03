@@ -12,3 +12,4 @@ modules/concert-nearby-mesh/android/build
 *.apk
 GoogleService-Info.plist
 google-services.json
+**/.DS_Store

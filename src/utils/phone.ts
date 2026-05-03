@@ -71,5 +71,5 @@ export function formatPhoneNumber(phoneNumber: string) {
 
 export function isLikelyPhoneNumber(value: string) {
   const normalized = normalizePhoneNumber(value);
-  return normalized.length >= 8;
+  return normalized.slice(1).length >= 8;
 }

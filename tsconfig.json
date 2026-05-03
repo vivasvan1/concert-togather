@@ -4,6 +4,8 @@
     "strict": true
   },
   "exclude": [
-    "functions"
+    "functions",
+    "**/*.test.ts",
+    "**/*.test.tsx"
   ]
 }

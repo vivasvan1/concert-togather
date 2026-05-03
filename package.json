@@ -13,6 +13,7 @@
     "web": "expo start --web",
     "backend": "bun run scripts/relay-server.ts",
     "relay": "bun run scripts/relay-server.ts",
+    "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

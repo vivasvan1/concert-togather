@@ -248,3 +248,9 @@ This fallback path is for real cross-device testing over Wi‑Fi with encrypted 
 2. Expand from direct nearby messaging to tested multi-hop forwarding.
 3. Implement an iOS-capable nearby transport with `MultipeerConnectivity` and explicit foreground constraints.
 4. Add a minimal coordination backend for accounts, event join, key bundles, and online bootstrap.
+
+
+```sh
+DEVICE1="192.168.31.219:43183" DEVICE2="192.168." APK_PATH="$PWD/concert-togather-release.apk" && bun run android:fast-build && adb connect "$DEVICE1" && adb connect "$DEVICE2" && adb -s "$DEVICE1" install -r "$APK_PATH" && adb -s "$DEVICE2" install -r "$APK_PATH" && adb -s "$DEVICE1" logcat -c && adb -s "$DEVICE2" logcat -c && adb -s "$DEVICE1" shell am force-stop com.vivasvan.concerttogather && adb -s "$DEVICE2" shell am force-stop com.vivasvan.concerttogather && adb -s "$DEVICE1" shell am start -ncom.vivasvan.concerttogather/.MainActivity && adb -s "$DEVICE2" shell am start -n com.vivasvan.concerttogather/.MainActivity && tmux new-window -n concert-logs "printf 'PHONE 1 %s\n\n' '$DEVICE1'; adb -s '$DEVICE1' logcat -v time ConcertNearbyMesh:V NearbyConnections:V AndroidRuntime:E '*:S'" \; split-window -h "printf 'PHONE 2 %s\n\n' '$DEVICE2'; adb -s '$DEVICE2' logcat -v time ConcertNearbyMesh:V NearbyConnections:V AndroidRuntime:E '*:S'" \; select-layout even-horizontal
+
+```
