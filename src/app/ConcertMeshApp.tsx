@@ -62,15 +62,6 @@ function getChatStatusLabel(friend: FriendProfile) {
   if (friend.chatStatus === "accepted") {
     return "Available";
   }
-  if (friend.chatStatus === "incoming-pending") {
-    return "Request";
-  }
-  if (friend.chatStatus === "outgoing-pending") {
-    return "Pending";
-  }
-  if (friend.chatStatus === "declined") {
-    return "Declined";
-  }
   return "Invite";
 }
 
@@ -88,15 +79,6 @@ function getConversationPreview(
 function getConversationSortBucket(friend: FriendProfile, unreadCount: number) {
   if (unreadCount > 0) {
     return 0;
-  }
-  if (friend.chatStatus === "incoming-pending") {
-    return 1;
-  }
-  if (friend.chatStatus === "accepted") {
-    return 2;
-  }
-  if (friend.chatStatus === "outgoing-pending") {
-    return 3;
   }
   return 4;
 }
@@ -144,15 +126,7 @@ function getComposerPlaceholder(friend: FriendProfile) {
     return `Message ${friend.displayName}`;
   }
 
-  if (friend.chatStatus === "incoming-pending") {
-    return "Accept to chat";
-  }
-
-  if (friend.chatStatus === "outgoing-pending") {
-    return "Waiting for approval";
-  }
-
-  return "Send a request first";
+  return "Accept to chat";
 }
 
 export function ConcertMeshApp() {
@@ -160,9 +134,7 @@ export function ConcertMeshApp() {
     state,
     bootstrapIdentity,
     syncContacts,
-    sendChatRequest,
-    approveFriendRequest,
-    declineFriendRequest,
+    inviteContact,
     sendChatMessage,
     setSelectedChatFriend,
     setRelayServerUrl,
@@ -191,10 +163,6 @@ export function ConcertMeshApp() {
     setRelayUrlDraft(state.relayServerUrl);
   }, [state.relayServerUrl]);
 
-  const incomingRequests = useMemo(
-    () => state.friends.filter((friend) => friend.chatStatus === "incoming-pending"),
-    [state.friends],
-  );
   const conversationSummaries = useMemo(() => {
     if (!state.user) {
       return [];
@@ -203,7 +171,6 @@ export function ConcertMeshApp() {
     const currentUserId = state.user.id;
 
     return state.friends
-      .filter((friend) => friend.chatStatus !== "declined")
       .map((friend) => {
         const messages = state.messages.filter(
           (message) =>
@@ -528,33 +495,10 @@ export function ConcertMeshApp() {
               {selectedFriend.chatStatus !== "accepted" ? (
                 <View style={styles.requestBanner}>
                   <Text style={styles.rowTitle}>{getChatStatusLabel(selectedFriend)}</Text>
-                  {selectedFriend.chatStatus === "incoming-pending" ? (
-                    <View style={styles.inlineActions}>
-                      <Pressable
-                        onPress={() => approveFriendRequest(selectedFriend.id)}
-                        style={({ pressed }) => [
-                          styles.primaryButton,
-                          styles.inlinePrimary,
-                          pressed && styles.buttonPressed,
-                        ]}
-                      >
-                        <Text style={styles.primaryButtonLabel}>Accept</Text>
-                      </Pressable>
-                      <Pressable
-                        onPress={() => declineFriendRequest(selectedFriend.id)}
-                        style={({ pressed }) => [
-                          styles.secondaryButton,
-                          styles.inlineSecondary,
-                          pressed && styles.buttonPressed,
-                        ]}
-                      >
-                        <Text style={styles.secondaryLabel}>Decline</Text>
-                      </Pressable>
-                    </View>
-                  ) : selectedFriend.chatStatus === "invitable-unregistered" ? (
+                  {selectedFriend.chatStatus === "invitable-unregistered" ? (
                     <Pressable
                       onPress={() =>
-                        sendChatRequest(
+                        inviteContact(
                           selectedFriend.phoneNumber,
                           selectedFriend.displayName,
                         )
@@ -565,7 +509,7 @@ export function ConcertMeshApp() {
                         pressed && styles.buttonPressed,
                       ]}
                     >
-                      <Text style={styles.secondaryLabel}>Retry request</Text>
+                      <Text style={styles.secondaryLabel}>Send Invite</Text>
                     </Pressable>
                   ) : null}
                 </View>
@@ -737,8 +681,8 @@ export function ConcertMeshApp() {
                           (friend) => friend.phoneNumber === newChatMatches.manualPhoneNumber,
                         ) ? (
                           <Pressable
-                            onPress={async () => {
-                              await sendChatRequest(newChatMatches.manualPhoneNumber);
+                            onPress={() => {
+                              inviteContact(newChatMatches.manualPhoneNumber);
                               setShowNewChat(false);
                               setSearchQuery("");
                             }}
@@ -753,7 +697,7 @@ export function ConcertMeshApp() {
                             <View style={styles.friendMeta}>
                               <Text style={styles.rowTitle}>{formatPhoneNumber(newChatMatches.manualPhoneNumber)}</Text>
                             </View>
-                            <Text style={[styles.badge, styles.mutedBadge]}>Request</Text>
+                            <Text style={[styles.badge, styles.mutedBadge]}>Invite</Text>
                           </Pressable>
                         ) : null}
 
@@ -797,8 +741,8 @@ export function ConcertMeshApp() {
                         {newChatMatches.contactMatches.map((contact: DeviceContact) => (
                           <Pressable
                             key={contact.id}
-                            onPress={async () => {
-                              await sendChatRequest(contact.phoneNumber, contact.displayName);
+                            onPress={() => {
+                              inviteContact(contact.phoneNumber, contact.displayName);
                               setShowNewChat(false);
                               setSearchQuery("");
                             }}
@@ -832,8 +776,8 @@ export function ConcertMeshApp() {
                         {newChatMatches.peerMatches.map((peer) => (
                           <Pressable
                             key={peer.id}
-                            onPress={async () => {
-                              await sendChatRequest(peer.phoneNumber ?? peer.alias, peer.alias);
+                            onPress={() => {
+                              inviteContact(peer.phoneNumber ?? peer.alias, peer.alias);
                               setShowNewChat(false);
                               setSearchQuery("");
                             }}
@@ -898,11 +842,7 @@ export function ConcertMeshApp() {
                                 </Text>
                               ) : friend.chatStatus !== "accepted" ? (
                                 <Text style={[styles.badge, styles.mutedBadge]}>
-                                  {friend.chatStatus === "incoming-pending"
-                                    ? "Request"
-                                    : friend.chatStatus === "outgoing-pending"
-                                      ? "Pending"
-                                      : "Invite"}
+                                  Invite
                                 </Text>
                               ) : null}
                             </View>
@@ -952,32 +892,7 @@ export function ConcertMeshApp() {
                 </View>
               </SectionCard>
 
-              <SectionCard title="Requests">
-                {incomingRequests.length === 0 ? (
-                  <Text style={styles.emptyStateLabel}>No requests</Text>
-                ) : (
-                  incomingRequests.map((friend) => (
-                    <View key={friend.id} style={styles.friendCard}>
-                      <View style={styles.friendMeta}>
-                        <Text style={styles.rowTitle}>{friend.displayName}</Text>
-                        <Text style={styles.rowMeta}>
-                          {friend.phoneNumberDisplay} · seen{" "}
-                          {minutesAgo(friend.lastSeenAt)}m ago
-                        </Text>
-                      </View>
-                      <Pressable
-                        onPress={() => approveFriendRequest(friend.id)}
-                        style={({ pressed }) => [
-                          styles.secondaryButton,
-                          pressed && styles.buttonPressed,
-                        ]}
-                      >
-                        <Text style={styles.secondaryLabel}>Accept</Text>
-                      </Pressable>
-                    </View>
-                  ))
-                )}
-              </SectionCard>
+
 
               <SectionCard title="Nearby phones">
                 {state.transportPeers.length === 0 ? (
@@ -1011,13 +926,13 @@ export function ConcertMeshApp() {
                           </Text>
                         ) : (
                           <Pressable
-                            onPress={() => sendChatRequest(peer.phoneNumber ?? peer.alias)}
+                            onPress={() => inviteContact(peer.phoneNumber ?? peer.alias)}
                             style={({ pressed }) => [
                               styles.secondaryButton,
                               pressed && styles.buttonPressed,
                             ]}
                           >
-                            <Text style={styles.secondaryLabel}>Send request</Text>
+                            <Text style={styles.secondaryLabel}>Invite</Text>
                           </Pressable>
                         )}
                       </View>

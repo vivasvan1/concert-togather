@@ -11,12 +11,10 @@ import { PermissionsAndroid, Platform } from "react-native";
 
 import { loadDeviceContacts, requestContactsPermission } from "../services/contacts/ContactsService";
 import {
-  createFirebaseFriendRequest,
   loadFirebaseUsersByIds,
-  loadPendingFirebaseFriendRequests,
   lookupFirebaseUserByPhone,
-  respondToFirebaseFriendRequest,
   upsertFirebaseUserProfile,
+  syncContactsToBackend,
 } from "../services/firebase/FirebaseBootstrapService";
 import {
   createUserIdentity,
@@ -88,25 +86,6 @@ type AppAction =
   | {
       type: "create-invite-placeholder";
       payload: { phoneNumber: string; displayName: string };
-    }
-  | {
-      type: "receive-friend-request";
-      payload: {
-        envelope: RelayEnvelope;
-        eventPayload: Extract<EventPayload, { kind: "friend-request" }>;
-      };
-    }
-  | {
-      type: "approve-friend-local";
-      payload: { friendId: string; approvedAt: string };
-    }
-  | { type: "decline-friend-local"; payload: { friendId: string } }
-  | {
-      type: "receive-friend-approval";
-      payload: {
-        envelope: RelayEnvelope;
-        eventPayload: Extract<EventPayload, { kind: "friend-approval" }>;
-      };
     }
   | {
       type: "receive-chat";
@@ -257,9 +236,6 @@ function upsertFriend(friends: FriendProfile[], nextFriend: FriendProfile): Frie
           publicKey: nextFriend.publicKey || friend.publicKey,
           encryptionPublicKey:
             nextFriend.encryptionPublicKey || friend.encryptionPublicKey,
-          requestId: nextFriend.requestId ?? friend.requestId,
-          requestedAt: nextFriend.requestedAt ?? friend.requestedAt,
-          approvedAt: nextFriend.approvedAt ?? friend.approvedAt,
         }
       : friend,
   );
@@ -292,19 +268,7 @@ function migrateUser(rawUser: any): UserIdentity | undefined {
 }
 
 function mapLegacyStatus(status: string | undefined): FriendProfile["chatStatus"] {
-  if (status === "approved") {
-    return "accepted";
-  }
-  if (status === "incoming-pending") {
-    return "incoming-pending";
-  }
-  if (status === "outgoing-pending") {
-    return "outgoing-pending";
-  }
-  if (status === "rejected") {
-    return "declined";
-  }
-  return "invitable-unregistered";
+  return "accepted";
 }
 
 function migrateFriend(rawFriend: any): FriendProfile {
@@ -318,11 +282,8 @@ function migrateFriend(rawFriend: any): FriendProfile {
       rawFriend.displayName || rawFriend.phoneNumberDisplay || formatPhoneNumber(phoneNumber) || "",
     publicKey: rawFriend.publicKey ?? "",
     encryptionPublicKey: rawFriend.encryptionPublicKey ?? "",
-    chatStatus: rawFriend.chatStatus ?? mapLegacyStatus(rawFriend.friendshipStatus),
+    chatStatus: "accepted",
     lastSeenAt: rawFriend.lastSeenAt ?? new Date().toISOString(),
-    requestId: rawFriend.requestId,
-    requestedAt: rawFriend.requestedAt,
-    approvedAt: rawFriend.approvedAt,
   };
 }
 
@@ -405,8 +366,6 @@ async function requestNearbyPermissions() {
 function buildPayload(
   user: UserIdentity,
   payload:
-    | { kind: "friend-request"; sentAt: string }
-    | { kind: "friend-approval"; sentAt: string }
     | { kind: "chat"; sentAt: string; body: string; messageId: string }
     | { kind: "delivery-receipt"; sentAt: string; messageId: string; deliveredAt: string }
     | { kind: "read-receipt"; sentAt: string; messageId: string; readAt: string }
@@ -422,25 +381,6 @@ function buildPayload(
     senderPhoneNumberDisplay: user.phoneNumberDisplay,
     senderLabel: user.displayName,
   };
-
-  if (payload.kind === "friend-request") {
-    return {
-      kind: "friend-request",
-      ...base,
-      sentAt: payload.sentAt,
-      encryptionPublicKey: user.encryptionPublicKey,
-    };
-  }
-
-  if (payload.kind === "friend-approval") {
-    return {
-      kind: "friend-approval",
-      ...base,
-      sentAt: payload.sentAt,
-      approved: true,
-      encryptionPublicKey: user.encryptionPublicKey,
-    };
-  }
 
   if (payload.kind === "chat") {
     return {
@@ -636,65 +576,6 @@ function reducer(state: AppState, action: AppAction): AppState {
         selectedChatFriendId: nextFriend.id,
       };
     }
-    case "receive-friend-request":
-      return applyFriendUpsert(state, {
-        id: action.payload.envelope.senderId,
-        phoneNumber: action.payload.eventPayload.senderPhoneNumber,
-        phoneNumberDisplay: action.payload.eventPayload.senderPhoneNumberDisplay,
-        displayName: action.payload.eventPayload.senderLabel,
-        publicKey: action.payload.envelope.senderPublicKey,
-        encryptionPublicKey: action.payload.eventPayload.encryptionPublicKey,
-        chatStatus: "incoming-pending",
-        lastSeenAt: action.payload.eventPayload.sentAt,
-        requestedAt: action.payload.eventPayload.sentAt,
-      });
-    case "approve-friend-local": {
-      const friends = state.friends.map((friend) =>
-        friend.id === action.payload.friendId
-          ? {
-              ...friend,
-              chatStatus: "accepted" as const,
-              approvedAt: action.payload.approvedAt,
-              lastSeenAt: action.payload.approvedAt,
-            }
-          : friend,
-      );
-
-      return {
-        ...state,
-        friends,
-        contacts: matchContacts(state.contacts, friends),
-        selectedChatFriendId: action.payload.friendId,
-      };
-    }
-    case "decline-friend-local": {
-      const friends = state.friends.map((friend) =>
-        friend.id === action.payload.friendId
-          ? {
-              ...friend,
-              chatStatus: "declined" as const,
-            }
-          : friend,
-      );
-
-      return {
-        ...state,
-        friends,
-        contacts: matchContacts(state.contacts, friends),
-      };
-    }
-    case "receive-friend-approval":
-      return applyFriendUpsert(state, {
-        id: action.payload.envelope.senderId,
-        phoneNumber: action.payload.eventPayload.senderPhoneNumber,
-        phoneNumberDisplay: action.payload.eventPayload.senderPhoneNumberDisplay,
-        displayName: action.payload.eventPayload.senderLabel,
-        publicKey: action.payload.envelope.senderPublicKey,
-        encryptionPublicKey: action.payload.eventPayload.encryptionPublicKey,
-        chatStatus: "accepted",
-        lastSeenAt: action.payload.eventPayload.sentAt,
-        approvedAt: action.payload.eventPayload.sentAt,
-      });
     case "receive-chat": {
       const currentUserId = state.user?.id ?? "";
       const conversationId = conversationIdFor(
@@ -847,9 +728,7 @@ interface AppContextValue {
   state: AppState;
   bootstrapIdentity: (phoneNumber: string, displayName?: string) => void;
   syncContacts: () => Promise<void>;
-  sendChatRequest: (phoneNumber: string, displayName?: string) => Promise<void>;
-  approveFriendRequest: (friendId: string) => Promise<void>;
-  declineFriendRequest: (friendId: string) => void;
+  inviteContact: (phoneNumber: string, displayName?: string) => void;
   sendChatMessage: (friendId: string, text: string) => Promise<void>;
   setSelectedChatFriend: (friendId?: string) => Promise<void>;
   setRelayServerUrl: (url: string) => void;
@@ -928,51 +807,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
 
     upsertFirebaseUserProfile(state.user).catch(() => undefined);
-  }, [state.user]);
-
-  useEffect(() => {
-    if (!state.user) {
-      return;
-    }
-
-    Promise.all([
-      loadPendingFirebaseFriendRequests(state.user.id),
-    ])
-      .then(async ([pendingRequests]) => {
-        const senderIds = pendingRequests
-          .map((request) => String(request.fromUid ?? ""))
-          .filter(Boolean);
-        const senders = await loadFirebaseUsersByIds(senderIds);
-        const friends = pendingRequests
-          .map((request) => {
-            const sender = senders.find((item) => item.uid === request.fromUid);
-            if (!sender) {
-              return undefined;
-            }
-
-            return {
-              id: sender.uid,
-              requestId: request.id,
-              phoneNumber: sender.phoneNumber,
-              phoneNumberDisplay: sender.phoneNumberDisplay,
-              displayName: sender.displayName,
-              publicKey: sender.publicKey ?? "",
-              encryptionPublicKey: sender.encryptionPublicKey ?? "",
-              chatStatus: "incoming-pending" as const,
-              lastSeenAt: request.updatedAt ?? request.createdAt ?? new Date().toISOString(),
-              requestedAt: request.createdAt,
-            };
-          })
-          .filter(Boolean) as FriendProfile[];
-
-        if (friends.length > 0) {
-          dispatch({
-            type: "sync-firebase-friends",
-            payload: friends,
-          });
-        }
-      })
-      .catch(() => undefined);
   }, [state.user]);
 
   useEffect(() => {
@@ -1085,22 +919,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               );
 
         const eventPayload = JSON.parse(plaintext) as EventPayload;
-
-        if (eventPayload.kind === "friend-request") {
-          dispatch({
-            type: "receive-friend-request",
-            payload: { envelope, eventPayload },
-          });
-          return;
-        }
-
-        if (eventPayload.kind === "friend-approval") {
-          dispatch({
-            type: "receive-friend-approval",
-            payload: { envelope, eventPayload },
-          });
-          return;
-        }
 
         if (eventPayload.kind === "chat") {
           dispatch({
@@ -1364,151 +1182,41 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           type: "set-contacts",
           payload: contacts,
         });
+
+        const phoneNumbers = contacts.map(c => c.phoneNumber).filter(Boolean);
+        if (phoneNumbers.length > 0) {
+          const registeredUsers = await syncContactsToBackend(phoneNumbers);
+          const friends = registeredUsers.map(user => ({
+            id: user.uid,
+            phoneNumber: user.phoneNumber,
+            phoneNumberDisplay: user.phoneNumberDisplay,
+            displayName: user.displayName,
+            publicKey: user.publicKey ?? "",
+            encryptionPublicKey: user.encryptionPublicKey ?? "",
+            chatStatus: "accepted" as const,
+            lastSeenAt: new Date().toISOString(),
+          }));
+
+          if (friends.length > 0) {
+            dispatch({
+              type: "sync-firebase-friends",
+              payload: friends,
+            });
+          }
+        }
       },
-      async sendChatRequest(phoneNumber, displayName) {
+      inviteContact(phoneNumber, displayName) {
         const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
         if (!state.user || !state.event || !isLikelyPhoneNumber(normalizedPhoneNumber)) {
           return;
         }
 
-        const existingFriend = state.friends.find(
-          (friend) => friend.phoneNumber === normalizedPhoneNumber,
-        );
-        const peer = state.transportPeers.find(
-          (item) =>
-            item.phoneNumber === normalizedPhoneNumber ||
-            normalizePhoneNumber(item.alias) === normalizedPhoneNumber,
-        );
-
-        if (!peer) {
-          try {
-            const registeredUser = await lookupFirebaseUserByPhone(normalizedPhoneNumber);
-
-            if (registeredUser) {
-              const sentAt = new Date().toISOString();
-              const requestId = await createFirebaseFriendRequest(registeredUser.uid);
-
-              dispatch({
-                type: "add-outgoing-request",
-                payload: {
-                  id: registeredUser.uid,
-                  requestId,
-                  phoneNumber: registeredUser.phoneNumber,
-                  phoneNumberDisplay: registeredUser.phoneNumberDisplay,
-                  displayName:
-                    displayName?.trim() ||
-                    registeredUser.displayName ||
-                    registeredUser.phoneNumberDisplay,
-                  publicKey: registeredUser.publicKey ?? "",
-                  encryptionPublicKey: registeredUser.encryptionPublicKey ?? "",
-                  chatStatus: "outgoing-pending",
-                  lastSeenAt: sentAt,
-                  requestedAt: sentAt,
-                },
-              });
-              return;
-            }
-          } catch {
-            // Fall back to nearby/local invite behavior when Firebase is unavailable.
-          }
-
-          dispatch({
-            type: "create-invite-placeholder",
-            payload: {
-              phoneNumber: normalizedPhoneNumber,
-              displayName: displayName?.trim() || formatPhoneNumber(normalizedPhoneNumber),
-            },
-          });
-          return;
-        }
-
-        const sentAt = new Date().toISOString();
-        const payload = buildPayload(state.user, {
-          kind: "friend-request",
-          sentAt,
-        });
-        const envelope = createControlRelayEnvelope(
-          JSON.stringify(payload),
-          state.user,
-          state.event,
-          [peer.id],
-        );
-
         dispatch({
-          type: "add-outgoing-request",
+          type: "create-invite-placeholder",
           payload: {
-            id: peer.id,
             phoneNumber: normalizedPhoneNumber,
-            phoneNumberDisplay:
-              peer.phoneNumberDisplay || formatPhoneNumber(normalizedPhoneNumber),
-            displayName:
-              existingFriend?.displayName ||
-              displayName?.trim() ||
-              peer.phoneNumberDisplay ||
-              formatPhoneNumber(normalizedPhoneNumber),
-            publicKey: existingFriend?.publicKey ?? "",
-            encryptionPublicKey: existingFriend?.encryptionPublicKey ?? "",
-            chatStatus: "outgoing-pending",
-            lastSeenAt: peer.lastSeenAt,
-            requestedAt: sentAt,
-            approvedAt: existingFriend?.approvedAt,
+            displayName: displayName?.trim() || formatPhoneNumber(normalizedPhoneNumber),
           },
-        });
-        dispatch({
-          type: "mark-seen-envelope",
-          payload: { envelopeId: envelope.id },
-        });
-
-        await transportRef.current.send(envelope);
-      },
-      async approveFriendRequest(friendId) {
-        const friend = state.friends.find((item) => item.id === friendId);
-        if (
-          !friend ||
-          !state.user ||
-          !state.event ||
-          !friend.encryptionPublicKey ||
-          friend.chatStatus !== "incoming-pending"
-        ) {
-          return;
-        }
-
-        if (friend.requestId) {
-          await respondToFirebaseFriendRequest(friend.requestId, "accept").catch(() => undefined);
-        }
-
-        const approvedAt = new Date().toISOString();
-        const payload = buildPayload(state.user, {
-          kind: "friend-approval",
-          sentAt: approvedAt,
-        });
-        const envelope = createDirectRelayEnvelope(
-          JSON.stringify(payload),
-          state.user,
-          state.event,
-          [friend.id],
-          friend.encryptionPublicKey,
-        );
-
-        dispatch({
-          type: "approve-friend-local",
-          payload: { friendId, approvedAt },
-        });
-        dispatch({
-          type: "mark-seen-envelope",
-          payload: { envelopeId: envelope.id },
-        });
-
-        await transportRef.current.send(envelope);
-      },
-      declineFriendRequest(friendId) {
-        const friend = state.friends.find((item) => item.id === friendId);
-        if (friend?.requestId) {
-          respondToFirebaseFriendRequest(friend.requestId, "decline").catch(() => undefined);
-        }
-        dispatch({
-          type: "decline-friend-local",
-          payload: { friendId },
         });
       },
       async sendChatMessage(friendId, text) {

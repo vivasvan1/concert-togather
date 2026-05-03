@@ -16,18 +16,7 @@ type LookupUserResponse = {
   };
 };
 
-type CreateFriendRequestResponse = {
-  requestId?: string;
-};
 
-export type PendingFirebaseFriendRequest = {
-  id: string;
-  fromUid: string;
-  toUid: string;
-  status: string;
-  createdAt?: string;
-  updatedAt?: string;
-};
 
 export type FirebaseUserProfile = {
   uid: string;
@@ -61,39 +50,12 @@ export async function lookupFirebaseUserByPhone(phoneNumber: string) {
   return response.data?.found ? response.data.user : undefined;
 }
 
-export async function createFirebaseFriendRequest(targetUid: string) {
-  const response = await functions().httpsCallable("createFriendRequest")({
-    targetUid,
-  }) as { data: CreateFriendRequestResponse };
+export async function syncContactsToBackend(phoneNumbers: string[]) {
+  const response = await functions().httpsCallable("syncContacts")({
+    phoneNumbers,
+  }) as { data: { users: FirebaseUserProfile[] } };
 
-  return response.data?.requestId as string | undefined;
-}
-
-export async function respondToFirebaseFriendRequest(
-  requestId: string,
-  action: "accept" | "decline",
-) {
-  await functions().httpsCallable("respondToFriendRequest")({
-    requestId,
-    action,
-  });
-}
-
-export async function loadPendingFirebaseFriendRequests(currentUid: string) {
-  const snapshot = await firestore()
-    .collection("friendRequests")
-    .where("toUid", "==", currentUid)
-    .where("status", "==", "pending")
-    .orderBy("updatedAt", "desc")
-    .get();
-
-  return snapshot.docs.map(
-    (doc) =>
-      ({
-        id: doc.id,
-        ...(doc.data() as Omit<PendingFirebaseFriendRequest, "id">),
-      }) satisfies PendingFirebaseFriendRequest,
-  );
+  return response.data?.users || [];
 }
 
 export async function loadFirebaseUsersByIds(userIds: string[]) {

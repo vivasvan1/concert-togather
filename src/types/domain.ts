@@ -24,14 +24,9 @@ export type AvailabilityState = "online" | "degraded" | "offline";
 
 export type ChatRequestStatus =
   | "accepted"
-  | "outgoing-pending"
-  | "incoming-pending"
-  | "declined"
   | "invitable-unregistered";
 
 export type MessageKind =
-  | "friend-request"
-  | "friend-approval"
   | "chat"
   | "delivery-receipt"
   | "read-receipt"
@@ -50,7 +45,6 @@ export interface UserIdentity {
 
 export interface FriendProfile {
   id: string;
-  requestId?: string;
   phoneNumber: string;
   phoneNumberDisplay: string;
   displayName: string;
@@ -58,8 +52,6 @@ export interface FriendProfile {
   encryptionPublicKey: string;
   chatStatus: ChatRequestStatus;
   lastSeenAt: string;
-  requestedAt?: string;
-  approvedAt?: string;
 }
 
 export interface DeviceContact {
@@ -164,23 +156,6 @@ export interface AppState {
 }
 
 export type EventPayload =
-  | {
-      kind: "friend-request";
-      senderPhoneNumber: string;
-      senderPhoneNumberDisplay: string;
-      senderLabel: string;
-      sentAt: string;
-      encryptionPublicKey: string;
-    }
-  | {
-      kind: "friend-approval";
-      senderPhoneNumber: string;
-      senderPhoneNumberDisplay: string;
-      senderLabel: string;
-      sentAt: string;
-      approved: true;
-      encryptionPublicKey: string;
-    }
   | {
       kind: "chat";
       messageId: string;

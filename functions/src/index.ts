@@ -97,65 +97,41 @@ export const upsertUserProfile = onCall(async (request) => {
   return {ok: true};
 });
 
-export const createFriendRequest = onCall(async (request) => {
-  const uid = requireAuth(request as CallableContext);
-  const targetUid = String(request.data?.targetUid ?? "").trim();
+export const syncContacts = onCall(async (request) => {
+  requireAuth(request as CallableContext);
+  const phoneNumbers: string[] = request.data?.phoneNumbers || [];
 
-  if (!targetUid || targetUid === uid) {
-    throw new HttpsError("invalid-argument", "A valid target user is required.");
+  if (!Array.isArray(phoneNumbers)) {
+    throw new HttpsError("invalid-argument", "phoneNumbers must be an array.");
   }
 
-  const requestRef = db.collection("friendRequests").doc();
-  await requestRef.set({
-    fromUid: uid,
-    toUid: targetUid,
-    status: "pending",
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  });
-
-  return {requestId: requestRef.id};
-});
-
-export const respondToFriendRequest = onCall(async (request) => {
-  const uid = requireAuth(request as CallableContext);
-  const requestId = String(request.data?.requestId ?? "").trim();
-  const action = String(request.data?.action ?? "").trim();
-
-  if (!requestId || (action !== "accept" && action !== "decline")) {
-    throw new HttpsError("invalid-argument", "A valid request response is required.");
+  const normalized = Array.from(new Set(phoneNumbers.map(normalizePhoneNumber).filter(Boolean)));
+  if (normalized.length === 0) {
+    return {users: []};
   }
 
-  const requestRef = db.collection("friendRequests").doc(requestId);
-  const requestSnap = await requestRef.get();
-
-  if (!requestSnap.exists) {
-    throw new HttpsError("not-found", "Friend request not found.");
+  const chunks: string[][] = [];
+  for (let i = 0; i < normalized.length; i += 30) {
+    chunks.push(normalized.slice(i, i + 30));
   }
 
-  const friendRequest = requestSnap.data()!;
-  if (friendRequest.toUid !== uid) {
-    throw new HttpsError("permission-denied", "Only the recipient may respond.");
+  const users: any[] = [];
+  for (const chunk of chunks) {
+    const snapshot = await db.collection("users").where("phoneNumber", "in", chunk).get();
+    for (const doc of snapshot.docs) {
+      const user = doc.data();
+      users.push({
+        uid: doc.id,
+        displayName: user.displayName,
+        phoneNumber: user.phoneNumber,
+        phoneNumberDisplay: user.phoneNumberDisplay,
+        publicKey: user.publicKey ?? "",
+        encryptionPublicKey: user.encryptionPublicKey ?? "",
+      });
+    }
   }
 
-  const nextStatus = action === "accept" ? "accepted" : "declined";
-  await requestRef.set(
-    {
-      status: nextStatus,
-      updatedAt: new Date().toISOString(),
-    },
-    {merge: true},
-  );
-
-  if (nextStatus === "accepted") {
-    const friendshipId = conversationIdFor(friendRequest.fromUid, friendRequest.toUid);
-    await db.collection("friendships").doc(friendshipId).set({
-      members: [friendRequest.fromUid, friendRequest.toUid],
-      createdAt: new Date().toISOString(),
-    });
-  }
-
-  return {ok: true};
+  return {users};
 });
 
 export const createEventGroup = onCall(async (request) => {
