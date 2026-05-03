@@ -30,6 +30,9 @@ import {
   createDirectRelayEnvelope,
   forwardRelayEnvelope,
 } from "../services/mesh/relay";
+import { createRelayAckEnvelope } from "../services/mesh/RelayAckFactory";
+import { relayBroadcaster } from "../services/mesh/RelayBroadcaster";
+import { relayStore } from "../services/mesh/RelayStore";
 import type { MeshTransport } from "../services/mesh/Transport";
 import { WebSocketRelayTransport } from "../services/mesh/WebSocketRelayTransport";
 import { createSeedState } from "../data/mockData";
@@ -791,6 +794,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         });
       })
       .catch(() => undefined);
+
+    relayStore.load().then(() => relayStore.pruneExpired()).catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -891,6 +896,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         payload: { envelopeId: envelope.id },
       });
 
+      if (envelope.relayAckKey) {
+        const ackExpired = envelope.relayAckExpiresAt
+          ? new Date(envelope.relayAckExpiresAt).getTime() <= Date.now()
+          : false;
+        if (!ackExpired) {
+          relayStore.remove(envelope.relayAckKey).catch(() => undefined);
+          if (envelope.ttl > 0) {
+            transportRef.current
+              .send(forwardRelayEnvelope(envelope))
+              .catch(() => undefined);
+          }
+        }
+        return;
+      }
+
       if (!isEnvelopeForCurrentUser(envelope, currentState.user.id)) {
         if (envelope.ttl > 0) {
           transportRef.current
@@ -899,6 +919,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               dispatch({ type: "increment-relay-forwarded" });
             })
             .catch(() => undefined);
+        }
+        if (envelope.messageKind === "chat") {
+          relayStore.add(envelope).catch(() => undefined);
         }
         return;
       }
@@ -925,6 +948,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             type: "receive-chat",
             payload: { envelope, eventPayload },
           });
+
+          const ackEnvelope = createRelayAckEnvelope(
+            envelope.dedupeKey,
+            currentState.user,
+            currentState.event,
+          );
+          dispatch({
+            type: "mark-seen-envelope",
+            payload: { envelopeId: ackEnvelope.id },
+          });
+          transportRef.current.send(ackEnvelope).catch(() => undefined);
 
           const friend = currentState.friends.find((item) => item.id === envelope.senderId);
           const readAt = new Date().toISOString();
@@ -1045,10 +1079,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         });
       });
 
+    relayBroadcaster.start(transport);
+
     return () => {
       unsubscribeEnvelope();
       unsubscribePeers();
       unsubscribeConnection();
+      relayBroadcaster.stop();
       transport.stop().catch(() => undefined);
     };
   }, [
@@ -1260,6 +1297,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           state.event,
           [friend.id],
           friend.encryptionPublicKey,
+          "chat",
         );
 
         dispatch({

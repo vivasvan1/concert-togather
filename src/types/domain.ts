@@ -108,6 +108,9 @@ export interface RelayEnvelope {
   ttl: number;
   dedupeKey: string;
   createdAt: string;
+  messageKind?: MessageKind;
+  relayAckKey?: string;
+  relayAckExpiresAt?: string;
 }
 
 export interface MeshCapability {

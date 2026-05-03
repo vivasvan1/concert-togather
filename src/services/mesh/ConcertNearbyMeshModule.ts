@@ -30,6 +30,8 @@ export type ConcertNearbyMeshNativeModule = {
   startSession(eventId: string, userId: string, alias: string): Promise<void>;
   stopSession(): Promise<void>;
   sendEnvelope(envelopeJson: string): Promise<void>;
+  startRelayService(): Promise<void>;
+  stopRelayService(): Promise<void>;
   addListener(
     eventName: "onConnectionStateChanged",
     listener: (event: ConnectionEvent) => void,
@@ -41,6 +43,10 @@ export type ConcertNearbyMeshNativeModule = {
   addListener(
     eventName: "onEnvelope",
     listener: (event: EnvelopeEvent) => void,
+  ): { remove(): void };
+  addListener(
+    eventName: "onRelayTick",
+    listener: (event: Record<string, never>) => void,
   ): { remove(): void };
 };
 

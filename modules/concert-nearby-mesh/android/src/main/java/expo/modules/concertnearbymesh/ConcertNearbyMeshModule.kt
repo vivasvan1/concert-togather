@@ -1,5 +1,7 @@
 package expo.modules.concertnearbymesh
 
+import android.content.Intent
+import android.os.Build
 import android.util.Log
 import com.google.android.gms.common.api.ApiException
 import com.google.android.gms.tasks.Task
@@ -40,6 +42,14 @@ data class NearbyPeer(
 )
 
 class ConcertNearbyMeshModule : Module() {
+  companion object {
+    @Volatile private var moduleRef: ConcertNearbyMeshModule? = null
+
+    fun emitRelayTick() {
+      moduleRef?.sendEvent("onRelayTick", emptyMap<String, Any>())
+    }
+  }
+
   private val discoveredPeers = ConcurrentHashMap<String, NearbyPeer>()
   private val connectedPeers = ConcurrentHashMap<String, NearbyPeer>()
   private val connectingPeerIds = ConcurrentHashMap.newKeySet<String>()
@@ -57,7 +67,11 @@ class ConcertNearbyMeshModule : Module() {
   override fun definition() = ModuleDefinition {
     Name(MODULE_NAME)
 
-    Events("onConnectionStateChanged", "onPeersChanged", "onEnvelope")
+    Events("onConnectionStateChanged", "onPeersChanged", "onEnvelope", "onRelayTick")
+
+    OnCreate {
+      moduleRef = this@ConcertNearbyMeshModule
+    }
 
     Function("isAvailable") {
       appContext.reactContext != null
@@ -152,7 +166,23 @@ class ConcertNearbyMeshModule : Module() {
     }
 
     OnDestroy {
+      moduleRef = null
       stopActiveSession()
+    }
+
+    AsyncFunction("startRelayService") {
+      val context = appContext.reactContext ?: return@AsyncFunction
+      val intent = Intent(context, RelayForegroundService::class.java)
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        context.startForegroundService(intent)
+      } else {
+        context.startService(intent)
+      }
+    }
+
+    AsyncFunction("stopRelayService") {
+      val context = appContext.reactContext ?: return@AsyncFunction
+      context.stopService(Intent(context, RelayForegroundService::class.java))
     }
   }
 

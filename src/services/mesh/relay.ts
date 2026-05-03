@@ -1,4 +1,4 @@
-import type { EventRecord, RelayEnvelope, UserIdentity } from "../../types/domain";
+import type { EventRecord, MessageKind, RelayEnvelope, UserIdentity } from "../../types/domain";
 
 import {
   encryptForRecipient,
@@ -7,7 +7,7 @@ import {
 } from "../crypto/CryptoService";
 import { createId } from "../../utils/ids";
 
-const MAX_TTL = 6;
+export const MAX_TTL = 6;
 
 export function createDirectRelayEnvelope(
   payload: string,
@@ -15,6 +15,7 @@ export function createDirectRelayEnvelope(
   event: EventRecord,
   recipientIds: string[],
   recipientEncryptionPublicKey: string,
+  messageKind?: MessageKind,
 ): RelayEnvelope {
   const { ciphertext, nonce } = encryptForRecipient(
     payload,
@@ -37,6 +38,7 @@ export function createDirectRelayEnvelope(
     ttl: MAX_TTL,
     dedupeKey: createId("dedupe"),
     createdAt,
+    messageKind,
   };
 
   return {
