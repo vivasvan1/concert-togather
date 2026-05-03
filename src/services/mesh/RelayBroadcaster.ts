@@ -9,6 +9,24 @@ class RelayBroadcaster {
   private transport: MeshTransport | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private tickSubscription: { remove(): void } | null = null;
+  private _enabled = true;
+  private _lastTickAt: number | null = null;
+
+  get isEnabled(): boolean {
+    return this._enabled;
+  }
+
+  get lastTickAt(): number | null {
+    return this._lastTickAt;
+  }
+
+  setEnabled(value: boolean): void {
+    this._enabled = value;
+  }
+
+  async forceTick(): Promise<void> {
+    await this.tick();
+  }
 
   start(transport: MeshTransport): void {
     this.transport = transport;
@@ -44,7 +62,8 @@ class RelayBroadcaster {
   }
 
   private async tick(): Promise<void> {
-    if (!this.transport) return;
+    if (!this._enabled || !this.transport) return;
+    this._lastTickAt = Date.now();
     await relayStore.pruneExpired();
     for (const envelope of relayStore.getActive()) {
       this.transport.send(envelope).catch(() => undefined);

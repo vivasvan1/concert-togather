@@ -171,7 +171,7 @@ class ConcertNearbyMeshModule : Module() {
     }
 
     AsyncFunction("startRelayService") {
-      val context = appContext.reactContext ?: return@AsyncFunction
+      val context = appContext.reactContext ?: throw IllegalStateException("React context unavailable")
       val intent = Intent(context, RelayForegroundService::class.java)
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
         context.startForegroundService(intent)
@@ -181,7 +181,7 @@ class ConcertNearbyMeshModule : Module() {
     }
 
     AsyncFunction("stopRelayService") {
-      val context = appContext.reactContext ?: return@AsyncFunction
+      val context = appContext.reactContext ?: throw IllegalStateException("React context unavailable")
       context.stopService(Intent(context, RelayForegroundService::class.java))
     }
   }

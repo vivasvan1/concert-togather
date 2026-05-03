@@ -12,6 +12,7 @@ import {
   View,
 } from "react-native";
 
+import { RelayDebugPanel } from "../components/RelayDebugPanel";
 import { SectionCard } from "../components/SectionCard";
 import {
   confirmPhoneOtp,
@@ -979,6 +980,8 @@ export function ConcertMeshApp() {
                   </View>
                 ))}
               </SectionCard>
+
+              {__DEV__ && <RelayDebugPanel />}
             </>
           ) : null}
           </ScrollView>

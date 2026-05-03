@@ -4,14 +4,26 @@ import type { RelayEnvelope } from "../../types/domain";
 import { RELAY_TTL_MS } from "./relayConfig";
 
 const RELAY_STORE_KEY = "concert-togather/relay-store-v1";
+const MAX_RECENT_ACKS = 10;
 
 interface RelayEntry {
   envelope: RelayEnvelope;
   expiresAt: number;
 }
 
+export interface RelayStoreEntry {
+  dedupeKey: string;
+  senderId: string;
+  expiresAt: number;
+}
+
 class RelayStore {
   private entries = new Map<string, RelayEntry>();
+  private _recentAcks: string[] = [];
+
+  get recentAcks(): string[] {
+    return this._recentAcks;
+  }
 
   async load(): Promise<void> {
     try {
@@ -43,6 +55,7 @@ class RelayStore {
   async remove(dedupeKey: string): Promise<void> {
     if (!this.entries.has(dedupeKey)) return;
     this.entries.delete(dedupeKey);
+    this._recentAcks = [dedupeKey, ...this._recentAcks].slice(0, MAX_RECENT_ACKS);
     await this.persist();
   }
 
@@ -51,6 +64,19 @@ class RelayStore {
     return Array.from(this.entries.values())
       .filter((e) => e.expiresAt > now)
       .map((e) => e.envelope);
+  }
+
+  getSnapshot(): RelayStoreEntry[] {
+    return Array.from(this.entries.values()).map((e) => ({
+      dedupeKey: e.envelope.dedupeKey,
+      senderId: e.envelope.senderId,
+      expiresAt: e.expiresAt,
+    }));
+  }
+
+  async clearAll(): Promise<void> {
+    this.entries.clear();
+    await this.persist();
   }
 
   async pruneExpired(): Promise<void> {
